@@ -1,0 +1,114 @@
+import datetime
+from sqlalchemy import (
+    Column, Integer, String, Text, DateTime, Boolean, ForeignKey, Date,
+    MetaData, create_engine
+)
+from sqlalchemy.orm import relationship, declarative_base
+from sqlalchemy.sql import func
+import json
+
+# Define naming convention for constraints for Alembic autogenerate
+convention = {
+    "ix": "ix_%(column_0_label)s",
+    "uq": "uq_%(table_name)s_%(column_0_name)s",
+    "ck": "ck_%(table_name)s_%(constraint_name)s",
+    "fk": "fk_%(table_name)s_%(column_0_name)s_%(referred_table_name)s",
+    "pk": "pk_%(table_name)s"
+}
+
+metadata = MetaData(naming_convention=convention)
+Base = declarative_base(metadata=metadata)
+
+class ReportRequest(Base):
+    __tablename__ = 'report_requests'
+
+    request_id = Column(Integer, primary_key=True, index=True)
+    client_name = Column(String(255), nullable=True)
+    client_email = Column(String(255), nullable=False, index=True)
+    company_name = Column(String(255), nullable=True)
+    report_type = Column(String(50), nullable=False) # e.g., 'standard_499', 'premium_999'
+    request_details = Column(Text, nullable=False)
+    status = Column(String(50), nullable=False, default='PENDING', index=True) # PENDING, PROCESSING, COMPLETED, FAILED
+    report_output_path = Column(String(1024), nullable=True) # Path to generated report file/data
+    error_message = Column(Text, nullable=True) # Store errors if status is FAILED
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+class Prospect(Base):
+    __tablename__ = 'prospects'
+
+    prospect_id = Column(Integer, primary_key=True, index=True)
+    company_name = Column(String(255), nullable=False)
+    website = Column(String(255), nullable=True)
+    contact_name = Column(String(255), nullable=True)
+    contact_email = Column(String(255), nullable=True, unique=True, index=True)
+    potential_pain_point = Column(Text, nullable=True)
+    source = Column(String(100), nullable=True) # 'scraping_linkedin', 'scraping_web', 'research_tool'
+    status = Column(String(50), nullable=False, default='NEW', index=True) # NEW, RESEARCHING, CONTACTED, REPLY_POSITIVE, REPLY_NEGATIVE, BOUNCED, UNSUBSCRIBED, DO_NOT_CONTACT
+    last_contacted_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+class EmailAccount(Base):
+    __tablename__ = 'email_accounts'
+
+    account_id = Column(Integer, primary_key=True, index=True)
+    email_address = Column(String(255), nullable=False, unique=True)
+    smtp_host = Column(String(255), nullable=False)
+    smtp_port = Column(Integer, nullable=False)
+    smtp_user = Column(String(255), nullable=False)
+    # IMPORTANT: Store encrypted password. Implement encryption/decryption logic.
+    # For simplicity here, storing as Text. USE A REAL ENCRYPTION METHOD IN PRODUCTION.
+    smtp_password_encrypted = Column(Text, nullable=False)
+    provider = Column(String(100), nullable=True) # 'sendgrid_free', 'mailgun_flex', 'brevo_free'
+    daily_limit = Column(Integer, nullable=False, default=100)
+    emails_sent_today = Column(Integer, nullable=False, default=0)
+    last_used_at = Column(DateTime(timezone=True), nullable=True)
+    last_reset_date = Column(Date, nullable=False, default=datetime.date.today)
+    is_active = Column(Boolean, default=True, nullable=False)
+    notes = Column(Text, nullable=True) # e.g., domain associated, warmup status
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+class KpiSnapshot(Base):
+    """Stores periodic snapshots of key performance indicators."""
+    __tablename__ = 'kpi_snapshots'
+
+    snapshot_id = Column(Integer, primary_key=True, index=True)
+    timestamp = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+    # Report Metrics
+    pending_reports = Column(Integer)
+    processing_reports = Column(Integer)
+    completed_reports_24h = Column(Integer)
+    failed_reports_24h = Column(Integer)
+    avg_report_time_seconds = Column(Float, nullable=True)
+    # Prospecting Metrics
+    new_prospects_24h = Column(Integer)
+    # Email Metrics
+    emails_sent_24h = Column(Integer)
+    active_email_accounts = Column(Integer)
+    deactivated_accounts_24h = Column(Integer)
+    bounce_rate_24h = Column(Float, nullable=True) # Percentage
+    # Financial Metrics (Placeholders - require payment integration)
+    revenue_24h = Column(Float, default=0.0)
+    # MCOL can add more KPIs as it learns
+
+class McolDecisionLog(Base):
+    """Logs decisions and actions taken by the MCOL."""
+    __tablename__ = 'mcol_decision_log'
+
+    log_id = Column(Integer, primary_key=True, index=True)
+    timestamp = Column(DateTime(timezone=True), server_default=func.now())
+    kpi_snapshot_id = Column(Integer, ForeignKey('kpi_snapshots.snapshot_id'), nullable=True) # Link to snapshot that triggered decision
+    priority_problem = Column(Text, nullable=True) # Problem identified (e.g., "High email bounce rate")
+    analysis_summary = Column(Text, nullable=True) # LLM analysis output
+    generated_strategy = Column(Text, nullable=True) # Strategy proposed by LLM
+    chosen_action = Column(Text, nullable=True) # Specific action MCOL decided to take
+    action_parameters = Column(JSON, nullable=True) # Parameters for the action (e.g., code snippet, API endpoint)
+    action_status = Column(String(50), default='PENDING') # PENDING, IMPLEMENTING, COMPLETED, FAILED, SUGGESTED
+    action_result = Column(Text, nullable=True) # Outcome of the action (e.g., "Code modification suggested", "API call failed")
+    follow_up_kpi_snapshot_id = Column(Integer, ForeignKey('kpi_snapshots.snapshot_id'), nullable=True) # Link to snapshot after action
+
+# Relationship (optional but good practice)
+KpiSnapshot.mcol_decisions = relationship("McolDecisionLog", backref="triggering_snapshot", foreign_keys=[McolDecisionLog.kpi_snapshot_id])
+KpiSnapshot.mcol_followups = relationship("McolDecisionLog", backref="followup_snapshot", foreign_keys=[McolDecisionLog.follow_up_kpi_snapshot_id])

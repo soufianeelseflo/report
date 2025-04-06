@@ -1,0 +1,34 @@
+name: 'Issue with Pre-Submission Checklist'
+description: "Before submitting your issue, please confirm you've followed these steps."
+title: '[Issue] - '
+labels: []
+assignees: []
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **You are about to open an issue and interrupt the day of a stranger on the internet. And that's okay!**
+
+        We all need help, and we should try to help each other as much as possible. But before you submit your issue, please make sure you've:
+        1. Read through the README.
+        2. Searched through existing GitHub issues to see if one of them answered your question.
+        3. Copied and pasted the README into ChatGPT or your favorite LLM of choice and asked it the question.
+        4. Spent 5 minutes thinking through this on your own.
+
+        If all these failed, please feel free to open an issue. :)
+
+  - type: checkboxes
+    id: confirmation
+    attributes:
+      label: "Please confirm that you've done the steps above:"
+      options:
+        - label: "Yes, I've read the README, searched existing issues, consulted an LLM, and thought it through."
+          required: true
+
+  - type: textarea
+    id: issue_description
+    attributes:
+      label: 'Describe the issue'
+      description: 'Provide a clear and concise description of your issue.'
+      placeholder: 'Describe your issue here...'

@@ -1,0 +1,42 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:15-alpine # Using alpine for smaller image size
+    container_name: agency_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-agencydb} # Use .env value or default
+      POSTGRES_USER: ${POSTGRES_USER:-agencyuser}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-supersecretpassword} # Ensure this matches .env
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432" # Expose DB port only if needed externally
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  app:
+    build:
+      context: . # Build context is the root directory containing Dockerfile, autonomous_agency, open-deep-research
+      dockerfile: autonomous_agency/Dockerfile # Specify path to Dockerfile
+    container_name: agency_app
+    env_file:
+      - ./autonomous_agency/.env # Load environment variables from .env file
+    depends_on:
+      db:
+        condition: service_healthy # Wait for db healthcheck to pass
+    ports:
+      - "8000:8000" # Map host port 8000 to container port 8000
+    # No volume mount for code in production - code is copied in Dockerfile
+    # volumes:
+    #   - ./autonomous_agency:/app/autonomous_agency # For development only
+    restart: unless-stopped
+    # The command is now handled by the ENTRYPOINT script in the Dockerfile
+
+volumes:
+  postgres_data:
+    driver: local

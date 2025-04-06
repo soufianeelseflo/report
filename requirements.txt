@@ -1,0 +1,27 @@
+# Core Framework & Server
+fastapi==0.111.0
+uvicorn[standard]==0.29.0
+pydantic==2.7.1
+pydantic-settings==2.2.1
+
+# Database (Async PostgreSQL)
+sqlalchemy[asyncio]==2.0.30
+asyncpg==0.29.0
+alembic==1.13.1
+psycopg2-binary==2.9.9 # Needed by Alembic even for async
+
+# HTTP Requests & Scraping
+httpx[http2]==0.27.0
+beautifulsoup4==4.12.3
+# playwright==1.44.0 # Optional: Uncomment if heavy JS scraping needed
+
+# Email
+aiosmtplib==3.0.1
+
+# Utilities
+python-dotenv==1.0.1
+tenacity==8.3.0 # For retries
+pycryptodome==3.20.0 # For potential encryption of sensitive data like SMTP passwords
+
+# Git interaction (if needed for repo updates)
+# GitPython==3.1.43
