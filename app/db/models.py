@@ -1,11 +1,11 @@
 import datetime
+import json
 from sqlalchemy import (
-    Column, Integer, String, Text, DateTime, Boolean, ForeignKey, Date,
-    MetaData, create_engine
+    Column, Integer, String, Text, DateTime, Boolean, ForeignKey, Date, Float, JSON
 )
 from sqlalchemy.orm import relationship, declarative_base
 from sqlalchemy.sql import func
-import json
+from sqlalchemy import MetaData
 
 # Define naming convention for constraints for Alembic autogenerate
 convention = {
@@ -26,13 +26,18 @@ class ReportRequest(Base):
     client_name = Column(String(255), nullable=True)
     client_email = Column(String(255), nullable=False, index=True)
     company_name = Column(String(255), nullable=True)
-    report_type = Column(String(50), nullable=False) # e.g., 'standard_499', 'premium_999'
+    report_type = Column(String(50), nullable=False) # e.g., 'standard_499', 'premium_999', 'unknown_paid'
     request_details = Column(Text, nullable=False)
-    status = Column(String(50), nullable=False, default='PENDING', index=True) # PENDING, PROCESSING, COMPLETED, FAILED
+    status = Column(String(50), nullable=False, default='AWAITING_PAYMENT', index=True) # AWAITING_PAYMENT, PENDING, PROCESSING, COMPLETED, FAILED
     report_output_path = Column(String(1024), nullable=True) # Path to generated report file/data
     error_message = Column(Text, nullable=True) # Store errors if status is FAILED
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # --- Payment Related Fields ---
+    payment_status = Column(String(50), default='unpaid', index=True) # unpaid, paid, refunded
+    lemonsqueezy_order_id = Column(String(255), nullable=True, unique=True, index=True)
+    lemonsqueezy_checkout_id = Column(String(255), nullable=True, index=True) # Optional: store checkout ID
 
 class Prospect(Base):
     __tablename__ = 'prospects'
@@ -43,11 +48,15 @@ class Prospect(Base):
     contact_name = Column(String(255), nullable=True)
     contact_email = Column(String(255), nullable=True, unique=True, index=True)
     potential_pain_point = Column(Text, nullable=True)
-    source = Column(String(100), nullable=True) # 'scraping_linkedin', 'scraping_web', 'research_tool'
+    source = Column(String(100), nullable=True) # 'signal_news', 'signal_linkedin', 'manual' etc.
     status = Column(String(50), nullable=False, default='NEW', index=True) # NEW, RESEARCHING, CONTACTED, REPLY_POSITIVE, REPLY_NEGATIVE, BOUNCED, UNSUBSCRIBED, DO_NOT_CONTACT
     last_contacted_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    # Optional: Store LinkedIn profile URL if found
+    linkedin_profile_url = Column(String(512), nullable=True)
+    # Optional: Store executive names/titles found
+    key_executives = Column(JSON, nullable=True) # Store as {"title": "name", ...}
 
 class EmailAccount(Base):
     __tablename__ = 'email_accounts'
@@ -57,9 +66,7 @@ class EmailAccount(Base):
     smtp_host = Column(String(255), nullable=False)
     smtp_port = Column(Integer, nullable=False)
     smtp_user = Column(String(255), nullable=False)
-    # IMPORTANT: Store encrypted password. Implement encryption/decryption logic.
-    # For simplicity here, storing as Text. USE A REAL ENCRYPTION METHOD IN PRODUCTION.
-    smtp_password_encrypted = Column(Text, nullable=False)
+    smtp_password_encrypted = Column(Text, nullable=False) # Store encrypted!
     provider = Column(String(100), nullable=True) # 'sendgrid_free', 'mailgun_flex', 'brevo_free'
     daily_limit = Column(Integer, nullable=False, default=100)
     emails_sent_today = Column(Integer, nullable=False, default=0)
@@ -77,6 +84,7 @@ class KpiSnapshot(Base):
     snapshot_id = Column(Integer, primary_key=True, index=True)
     timestamp = Column(DateTime(timezone=True), server_default=func.now(), index=True)
     # Report Metrics
+    awaiting_payment_reports = Column(Integer)
     pending_reports = Column(Integer)
     processing_reports = Column(Integer)
     completed_reports_24h = Column(Integer)
@@ -89,8 +97,9 @@ class KpiSnapshot(Base):
     active_email_accounts = Column(Integer)
     deactivated_accounts_24h = Column(Integer)
     bounce_rate_24h = Column(Float, nullable=True) # Percentage
-    # Financial Metrics (Placeholders - require payment integration)
-    revenue_24h = Column(Float, default=0.0)
+    # Financial Metrics
+    revenue_24h = Column(Float, default=0.0) # Calculated from successful orders
+    orders_created_24h = Column(Integer, default=0)
     # MCOL can add more KPIs as it learns
 
 class McolDecisionLog(Base):

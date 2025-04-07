@@ -1,6 +1,7 @@
 # autonomous_agency/app/api/endpoints/payments.py
 import hmac
 import hashlib
+import json
 from fastapi import APIRouter, Depends, HTTPException, status, Request, Header
 from sqlalchemy.ext.asyncio import AsyncSession
 import httpx
@@ -16,10 +17,12 @@ router = APIRouter()
 LEMONSQUEEZY_API_URL = "https://api.lemonsqueezy.com/v1"
 
 class CreateCheckoutRequest(BaseModel):
-    report_request_id: int
-    report_type: str # 'standard_499' or 'premium_999'
+    # Removed report_request_id - we create the request *after* payment now
+    report_type: str = Field(..., description="Type of report: 'standard_499' or 'premium_999'")
     client_email: str
     client_name: Optional[str] = None
+    company_name: Optional[str] = None # Optional: Collect company name
+    request_details: str = Field(..., description="Specific details or topic for the report")
 
 class CreateCheckoutResponse(BaseModel):
     checkout_url: str
@@ -33,27 +36,19 @@ async def get_ls_client() -> httpx.AsyncClient:
         "Accept": "application/vnd.api+json",
         "Content-Type": "application/vnd.api+json",
     }
-    # Use a new client per request or manage a shared one carefully
     return httpx.AsyncClient(base_url=LEMONSQUEEZY_API_URL, headers=headers, timeout=20.0)
 
 @router.post("/create-checkout", response_model=CreateCheckoutResponse, status_code=status.HTTP_201_CREATED)
 async def create_lemon_squeezy_checkout(
     payload: CreateCheckoutRequest,
-    db: AsyncSession = Depends(get_db_session),
     ls_client: httpx.AsyncClient = Depends(get_ls_client)
+    # No DB session needed here initially
 ):
-    """Creates a Lemon Squeezy checkout session for a report request."""
+    """Creates a Lemon Squeezy checkout session."""
     if not settings.LEMONSQUEEZY_STORE_ID or not settings.LEMONSQUEEZY_VARIANT_STANDARD or not settings.LEMONSQUEEZY_VARIANT_PREMIUM:
          raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Lemon Squeezy store/variant IDs not configured.")
 
-    # 1. Get the report request to confirm details (optional but good practice)
-    report_request = await db.get(models.ReportRequest, payload.report_request_id)
-    if not report_request:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Report request not found.")
-    if report_request.status != 'PENDING': # Prevent re-payment for processed requests
-         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Report request already processed or paid.")
-
-    # 2. Determine variant ID based on report type
+    # 1. Determine variant ID based on report type
     variant_id = None
     if payload.report_type == "standard_499":
         variant_id = settings.LEMONSQUEEZY_VARIANT_STANDARD
@@ -62,26 +57,31 @@ async def create_lemon_squeezy_checkout(
     else:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid report type for checkout.")
 
-    # 3. Prepare checkout data for Lemon Squeezy API
+    # 2. Prepare checkout data for Lemon Squeezy API
+    #    Pass necessary info via custom_data to be retrieved by webhook
+    custom_data_payload = {
+        "report_type": payload.report_type,
+        "request_details": payload.request_details,
+        "client_name": payload.client_name,
+        "company_name": payload.company_name,
+        # Add any other info needed post-payment
+    }
+
     checkout_data = {
         "data": {
             "type": "checkouts",
             "attributes": {
                 "checkout_options": {
                     "embed": False,
-                    # "media": False, # Optional: disable media?
-                    # "logo": False, # Optional: disable logo?
                 },
                 "checkout_data": {
                     "email": payload.client_email,
                     "name": payload.client_name,
-                    "custom": {
-                        # Store our internal request ID to link back on webhook
-                        "report_request_id": str(payload.report_request_id),
-                    },
+                    # Pass our internal data via custom fields
+                    "custom": custom_data_payload,
                 },
-                # Redirect URLs (Use your actual deployed URLs)
-                "redirect_url": f"{settings.AGENCY_BASE_URL}/order/success?session_id={{CHECKOUT_SESSION_ID}}", # Placeholder success page
+                # Redirect URLs (Use your actual deployed URLs from settings)
+                "redirect_url": f"{settings.AGENCY_BASE_URL}/order-success?session_id={{CHECKOUT_SESSION_ID}}", # Example success page
             },
             "relationships": {
                 "store": {"data": {"type": "stores", "id": settings.LEMONSQUEEZY_STORE_ID}},
@@ -90,33 +90,39 @@ async def create_lemon_squeezy_checkout(
         }
     }
 
-    # 4. Call Lemon Squeezy API
+    # 3. Call Lemon Squeezy API
     try:
         async with ls_client:
             response = await ls_client.post("/checkouts", json=checkout_data)
             response.raise_for_status() # Raise exception for 4xx/5xx errors
             ls_response_data = response.json()
             checkout_url = ls_response_data.get("data", {}).get("attributes", {}).get("url")
+            checkout_id = ls_response_data.get("data", {}).get("id") # Get checkout ID
 
             if not checkout_url:
                  raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Lemon Squeezy did not return a checkout URL.")
 
-            # Optionally: Update report_request status to 'AWAITING_PAYMENT' ?
-            # await crud.update_report_request_status(db, payload.report_request_id, status="AWAITING_PAYMENT")
-            # await db.commit() # Commit status change if needed
+            print(f"Created Lemon Squeezy checkout {checkout_id} for {payload.client_email}")
+            # We don't create the ReportRequest here; webhook does upon successful payment.
 
             return CreateCheckoutResponse(checkout_url=checkout_url)
 
     except httpx.HTTPStatusError as e:
+        error_detail = "Unknown payment provider error"
+        try:
+            error_payload = e.response.json()
+            error_detail = error_payload.get('errors', [{}])[0].get('detail', 'Unknown error')
+        except Exception:
+            pass # Ignore JSON parsing errors on error response
         print(f"Lemon Squeezy API Error: {e.response.status_code} - {e.response.text}")
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Payment provider error: {e.response.json().get('errors', [{}])[0].get('detail', 'Unknown error')}")
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Payment provider error: {error_detail}")
     except Exception as e:
         print(f"Error creating Lemon Squeezy checkout: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Could not initiate payment process.")
 
 
 # --- Webhook Handler ---
-@router.post("/webhook", status_code=status.HTTP_200_OK)
+@router.post("/webhook", status_code=status.HTTP_200_OK, include_in_schema=False) # Hide from OpenAPI docs
 async def lemon_squeezy_webhook(
     request: Request,
     x_signature: Optional[str] = Header(None),
@@ -124,8 +130,9 @@ async def lemon_squeezy_webhook(
 ):
     """Handles incoming webhooks from Lemon Squeezy."""
     if not settings.LEMONSQUEEZY_WEBHOOK_SECRET:
-        print("WARNING: Lemon Squeezy Webhook secret not set. Cannot verify signature.")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Webhook secret not configured.")
+        print("CRITICAL: Lemon Squeezy Webhook secret not set. Cannot process webhooks.")
+        # Return 200 OK to prevent retries, but log critical error
+        return {"message": "Webhook ignored, secret not configured."}
 
     # 1. Verify Signature
     raw_body = await request.body()
@@ -145,42 +152,43 @@ async def lemon_squeezy_webhook(
 
     # 2. Process Event
     try:
-        event_data = await request.json()
-        event_name = event_data.get("meta", {}).get("event_name")
-        custom_data = event_data.get("meta", {}).get("custom_data", {})
-        report_request_id_str = custom_data.get("report_request_id")
+        event_data = json.loads(raw_body) # Use json.loads on raw body
+        meta = event_data.get("meta", {})
+        event_name = meta.get("event_name")
+        custom_data = meta.get("custom_data", {}) # Custom data passed during checkout creation
+        order_data = event_data.get("data") # The actual order object
 
-        print(f"Received Lemon Squeezy webhook: {event_name} for request ID: {report_request_id_str}")
+        print(f"Received Lemon Squeezy webhook: {event_name}")
 
-        if event_name == "order_created" or event_name == "subscription_created": # Handle one-time or subscription payments
-            if report_request_id_str:
+        # --- Process successful order ---
+        if event_name == "order_created":
+            if order_data and order_data.get("type") == "orders":
                 try:
-                    report_request_id = int(report_request_id_str)
-                    # --- CRITICAL: Update report status to PAID/PENDING ---
-                    # Find the corresponding report request
-                    report_request = await db.get(models.ReportRequest, report_request_id)
-                    if report_request and report_request.status != 'COMPLETED' and report_request.status != 'PROCESSING':
-                        # Update status to PENDING to trigger the ReportGenerator
-                        await crud.update_report_request_status(db, report_request_id, status="PENDING")
-                        # Optionally store payment info (order ID, amount) if needed
-                        # e.g., add columns to ReportRequest or a separate Payments table
-                        # report_request.payment_status = "PAID"
-                        # report_request.payment_order_id = event_data.get("data",{}).get("id")
+                    # Use the custom data passed during checkout creation
+                    # to get the necessary details for the report request
+                    report_request = await crud.create_report_request_from_webhook(db, order_data)
+                    if report_request:
                         await db.commit()
-                        print(f"Payment confirmed for Report Request ID {report_request_id}. Status set to PENDING.")
-                    elif report_request:
-                         print(f"Payment webhook received for already processed/completed Report Request ID {report_request_id}. Ignoring status update.")
+                        print(f"Successfully processed order {order_data.get('id')} and created ReportRequest {report_request.request_id}")
                     else:
-                         print(f"Payment webhook received but Report Request ID {report_request_id} not found.")
+                        # Order might already be processed or missing data
+                        await db.rollback() # Rollback if creation failed or skipped
 
-                except ValueError:
-                    print(f"Invalid report_request_id in webhook custom data: {report_request_id_str}")
                 except Exception as e:
-                     print(f"Error processing payment confirmation for request {report_request_id_str}: {e}")
-                     await db.rollback() # Rollback if DB update fails
-                     # Potentially raise 500 to signal retry to Lemon Squeezy? Check their docs.
+                     print(f"Error processing 'order_created' webhook for order {order_data.get('id')}: {e}")
+                     await db.rollback() # Rollback DB changes on error
+                     # Return 500 to potentially trigger retry from Lemon Squeezy? Check docs.
+                     # raise HTTPException(status_code=500, detail="Internal error processing webhook")
+                     # For now, return 200 but log error to avoid infinite retries if issue persists
+                     return {"message": "Webhook received but processing failed internally."}
             else:
-                print("Webhook received without report_request_id in custom_data.")
+                 print(f"Ignoring {event_name} webhook - missing or invalid order data.")
+
+        # --- Handle other events if needed (e.g., refunds) ---
+        # elif event_name == "order_refunded":
+        #     # Find original order, update status?
+        #     pass
+
         else:
             print(f"Ignoring irrelevant webhook event: {event_name}")
 
@@ -189,7 +197,7 @@ async def lemon_squeezy_webhook(
     except json.JSONDecodeError:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid JSON payload.")
     except Exception as e:
-        print(f"Error processing webhook: {e}")
+        print(f"Generic error processing webhook: {e}")
         # Return 200 OK even on processing error so Lemon Squeezy doesn't retry indefinitely,
         # but log the error thoroughly.
         return {"message": "Webhook received but processing failed internally."}
