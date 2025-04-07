@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Agency Control Panel</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            line-height: 1.6;
+            padding: 20px;
+            background-color: #f4f4f4;
+            color: #333;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: auto;
+            background: #fff;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+
+        h1,
+        h2 {
+            color: #2c3e50;
+            text-align: center;
+        }
+
+        .control-section {
+            margin-bottom: 30px;
+            padding: 20px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            background-color: #ecf0f1;
+        }
+
+        .control-section h2 {
+            margin-top: 0;
+            color: #34495e;
+            text-align: left;
+            border-bottom: 1px solid #bdc3c7;
+            padding-bottom: 10px;
+        }
+
+        .button-group {
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+            justify-content: center;
+            margin-top: 15px;
+        }
+
+        button {
+            padding: 12px 25px;
+            font-size: 16px;
+            cursor: pointer;
+            border: none;
+            border-radius: 5px;
+            transition: background-color 0.3s ease, transform 0.1s ease;
+            color: white;
+            min-width: 120px;
+        }
+
+        button:active {
+            transform: scale(0.98);
+        }
+
+        .start-btn {
+            background-color: #2ecc71;
+        }
+
+        .start-btn:hover {
+            background-color: #27ae60;
+        }
+
+        .stop-btn {
+            background-color: #e74c3c;
+        }
+
+        /* Kept for potential future individual stop */
+        .stop-btn:hover {
+            background-color: #c0392b;
+        }
+
+        .global-stop-btn {
+            background-color: #c0392b;
+            width: 100%;
+            margin-top: 20px;
+            font-weight: bold;
+        }
+
+        .global-stop-btn:hover {
+            background-color: #a52e22;
+        }
+
+        #status-message {
+            margin-top: 25px;
+            padding: 15px;
+            border-radius: 5px;
+            text-align: center;
+            font-weight: bold;
+            display: none;
+            /* Hidden by default */
+            background-color: #eafaf1;
+            color: #27ae60;
+            border: 1px solid #abebc6;
+        }
+
+        #status-message.error {
+            background-color: #fdedec;
+            color: #c0392b;
+            border: 1px solid #f5b7b1;
+        }
+
+        #status-message.info {
+            background-color: #e5e8e8;
+            color: #34495e;
+            border: 1px solid #d5dbdb;
+        }
+
+        .worker-status {
+            margin-top: 10px;
+            font-style: italic;
+            color: #7f8c8d;
+        }
+
+        /* Placeholder */
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1>🤖 Autonomous Agency Control Panel 🤖</h1>
+
+        <div class="control-section">
+            <h2>Core Agents</h2>
+            <div class="button-group">
+                <button class="start-btn" onclick="controlWorker('report_generator', 'start')">Start Report Gen</button>
+                <button class="start-btn" onclick="controlWorker('prospect_researcher', 'start')">Start
+                    Research</button>
+                <button class="start-btn" onclick="controlWorker('email_marketer', 'start')">Start Email</button>
+            </div>
+        </div>
+
+        <div class="control-section">
+            <h2>Meta-Cognitive Layer (MCOL)</h2>
+            <div class="button-group">
+                <button class="start-btn" onclick="controlWorker('mcol', 'start')">Start MCOL Brain</button>
+            </div>
+        </div>
+
+        <div class="control-section">
+            <h2>Global Control</h2>
+            <button class="global-stop-btn" onclick="controlWorker(null, 'stop_all')">🚨 STOP ALL AGENTS 🚨</button>
+            <p style="text-align: center; font-size: 0.9em; color: #7f8c8d;">(Sends stop signal; agents finish current
+                task)</p>
+        </div>
+
+        <div id="status-message"></div>
+    </div>
+
+    <script>
+        const statusDiv = document.getElementById('status-message');
+
+        async function controlWorker(workerName, action) {
+            let url = '';
+            // Use the correct base path for control endpoints
+            const controlBasePath = '/control';
+
+            if (action === 'start') {
+                url = `${controlBasePath}/start/${workerName}`;
+            } else if (action === 'stop_all') {
+                url = `${controlBasePath}/stop_all`;
+            } else {
+                console.error('Invalid action');
+                return;
+            }
+
+            displayMessage('Processing...', 'info');
+
+            try {
+                const response = await fetch(url, { method: 'POST' });
+                const data = await response.json(); // Always try to parse JSON
+
+                if (response.ok) {
+                    displayMessage(data.message || `${action} signal sent successfully.`, 'success');
+                } else {
+                    // Use detail from FastAPI's HTTPException or fallback
+                    displayMessage(`Error ${response.status}: ${data.detail || response.statusText || 'Unknown error'}`, 'error');
+                }
+            } catch (error) {
+                console.error('Fetch error:', error);
+                displayMessage(`Network error: Could not connect or invalid response.`, 'error');
+            }
+        }
+
+        function displayMessage(message, type = 'info') {
+            statusDiv.textContent = message;
+            statusDiv.className = type; // 'info', 'success', 'error'
+            statusDiv.style.display = 'block';
+
+            // Clear message after 7 seconds
+            setTimeout(() => {
+                if (statusDiv.textContent === message) { // Only clear if it's the same message
+                    statusDiv.style.display = 'none';
+                    statusDiv.textContent = '';
+                    statusDiv.className = '';
+                }
+            }, 7000);
+        }
+    </script>
+</body>
+
+</html>

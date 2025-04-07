@@ -13,8 +13,9 @@ services:
     ports:
       - "${POSTGRES_PORT:-5432}:5432" # Expose DB port only if needed externally
     healthcheck:
-      # Use pg_isready for healthcheck
-      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB} -h $${POSTGRES_SERVER:-db}"] # Assuming service name is db if not overridden
+      # Use pg_isready for healthcheck - requires postgresql-client in app image or separate check
+      # Using the check within the DB container itself is simpler if not exposing port
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 10s
       timeout: 5s
       retries: 5

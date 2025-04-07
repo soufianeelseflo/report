@@ -38,6 +38,7 @@ class ReportRequest(Base):
     payment_status = Column(String(50), default='unpaid', index=True) # unpaid, paid, refunded
     lemonsqueezy_order_id = Column(String(255), nullable=True, unique=True, index=True)
     lemonsqueezy_checkout_id = Column(String(255), nullable=True, index=True) # Optional: store checkout ID
+    order_total_cents = Column(Integer, nullable=True) # Store amount paid (in cents)
 
 class Prospect(Base):
     __tablename__ = 'prospects'
@@ -49,13 +50,11 @@ class Prospect(Base):
     contact_email = Column(String(255), nullable=True, unique=True, index=True)
     potential_pain_point = Column(Text, nullable=True)
     source = Column(String(100), nullable=True) # 'signal_news', 'signal_linkedin', 'manual' etc.
-    status = Column(String(50), nullable=False, default='NEW', index=True) # NEW, RESEARCHING, CONTACTED, REPLY_POSITIVE, REPLY_NEGATIVE, BOUNCED, UNSUBSCRIBED, DO_NOT_CONTACT
+    status = Column(String(50), nullable=False, default='NEW', index=True) # NEW, RESEARCHING, CONTACTED, REPLY_POSITIVE, REPLY_NEGATIVE, BOUNCED, UNSUBSCRIBED, DO_NOT_CONTACT, INVALID_EMAIL
     last_contacted_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
-    # Optional: Store LinkedIn profile URL if found
     linkedin_profile_url = Column(String(512), nullable=True)
-    # Optional: Store executive names/titles found
     key_executives = Column(JSON, nullable=True) # Store as {"title": "name", ...}
 
 class EmailAccount(Base):
@@ -111,7 +110,7 @@ class McolDecisionLog(Base):
     kpi_snapshot_id = Column(Integer, ForeignKey('kpi_snapshots.snapshot_id'), nullable=True) # Link to snapshot that triggered decision
     priority_problem = Column(Text, nullable=True) # Problem identified (e.g., "High email bounce rate")
     analysis_summary = Column(Text, nullable=True) # LLM analysis output
-    generated_strategy = Column(Text, nullable=True) # Strategy proposed by LLM
+    generated_strategy = Column(Text, nullable=True) # Store strategies as JSON string
     chosen_action = Column(Text, nullable=True) # Specific action MCOL decided to take
     action_parameters = Column(JSON, nullable=True) # Parameters for the action (e.g., code snippet, API endpoint)
     action_status = Column(String(50), default='PENDING') # PENDING, IMPLEMENTING, COMPLETED, FAILED, SUGGESTED

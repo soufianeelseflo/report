@@ -11,9 +11,10 @@ done
 
 # Apply database migrations
 echo "Applying database migrations..."
-# Need to set PYTHONPATH so alembic can find the app config/models
+# Need to set PYTHONPATH so alembic can find the app code
 export PYTHONPATH=/app
-# Run alembic using the ini file inside the app directory structure
+# Run alembic using the ini file at the root (copied to /app)
+# Use the absolute path to alembic.ini within the container
 alembic -c /app/alembic.ini upgrade head
 echo "Database migrations applied."
 

@@ -6,23 +6,30 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy import func, cast, Float, Integer as SQLInteger, text
 
+# Corrected relative imports for package structure
 from . import models
-from app.api import schemas # Import schemas
+from autonomous_agency.app.api import schemas # Assuming schemas is here
+from autonomous_agency.app.core.config import settings # Import settings for variant IDs
 from .models import KpiSnapshot, McolDecisionLog, ReportRequest, Prospect, EmailAccount
 
 async def create_report_request(db: AsyncSession, request: schemas.ReportRequestCreate) -> models.ReportRequest:
-    """Creates a new report request in the database, initially awaiting payment."""
+    """DEPRECATED? Creates a report request directly via API, bypassing payment initially."""
+    # This flow might be less used now that payment initiates creation.
+    # Keep it for potential manual overrides or different flows?
+    # Or modify it to also require payment step?
+    # For now, keep it but set status appropriately.
+    print("[DEPRECATED PATH?] Creating report request directly via API.")
     db_request = models.ReportRequest(
         client_name=request.client_name,
         client_email=request.client_email,
         company_name=request.company_name,
         report_type=request.report_type,
         request_details=request.request_details,
-        status="AWAITING_PAYMENT", # Start as awaiting payment
+        status="AWAITING_PAYMENT", # Requires payment step
         payment_status="unpaid"
     )
     db.add(db_request)
-    await db.flush() # Flush to get the ID without full commit yet
+    await db.flush()
     await db.refresh(db_request)
     return db_request
 
@@ -33,7 +40,7 @@ async def create_report_request_from_webhook(
     """Creates a report request after successful payment via webhook."""
 
     ls_order_id = order_data.get('id')
-    if not ls_order_id: return None # Should not happen
+    if not ls_order_id: return None
 
     # Check if order already processed
     existing = await db.scalar(select(models.ReportRequest).where(models.ReportRequest.lemonsqueezy_order_id == str(ls_order_id)))
@@ -41,44 +48,48 @@ async def create_report_request_from_webhook(
         print(f"[Webhook] Order ID {ls_order_id} already processed for ReportRequest ID {existing.request_id}. Skipping.")
         return None
 
-    # Extract necessary details from webhook payload
     attributes = order_data.get('attributes', {})
     customer_email = attributes.get('user_email')
     customer_name = attributes.get('user_name')
-    product_name = attributes.get('first_order_item', {}).get('product_name', 'Unknown Product')
-    variant_name = attributes.get('first_order_item', {}).get('variant_name', 'Unknown Variant')
+    # product_name = attributes.get('first_order_item', {}).get('product_name', 'Unknown Product') # Less reliable
+    # variant_name = attributes.get('first_order_item', {}).get('variant_name', 'Unknown Variant') # Less reliable
     variant_id = attributes.get('first_order_item', {}).get('variant_id')
-    order_total = attributes.get('total', 0) # Total in cents
+    order_total_cents = attributes.get('total', 0) # Total in cents
 
-    # --- CRUCIAL: Get the custom data (research details) ---
-    # This relies on you setting up custom fields in Lemon Squeezy checkout
     custom_data = attributes.get('custom_data', {})
-    request_details = custom_data.get('research_topic', 'Not Provided - Check Order Notes') # Adjust key 'research_topic'
-    company_name_custom = custom_data.get('company_name') # Optional custom field
+    # Use keys matching Lemon Squeezy custom field placeholders
+    request_details = custom_data.get('research_topic', 'Not Provided - Check Order Notes')
+    company_name_custom = custom_data.get('company_name')
 
     if not customer_email:
         print(f"[Webhook] Error: Missing customer email for order {ls_order_id}.")
-        return None # Cannot proceed without email
+        return None
 
-    # Determine report type based on variant ID (more reliable than name)
-    report_type_code = 'unknown_paid' # Fallback
+    # Determine report type based on variant ID
+    report_type_code = 'unknown_paid'
+    price_cents = 0
     if str(variant_id) == settings.LEMONSQUEEZY_VARIANT_STANDARD:
         report_type_code = 'standard_499'
+        price_cents = 49900
     elif str(variant_id) == settings.LEMONSQUEEZY_VARIANT_PREMIUM:
         report_type_code = 'premium_999'
+        price_cents = 99900
     else:
         print(f"[Webhook] Warning: Order {ls_order_id} variant ID {variant_id} doesn't match configured standard/premium IDs.")
+        # Use order total as fallback? Risky if discounts/taxes exist.
+        if order_total_cents == 49900: report_type_code = 'standard_499'
+        elif order_total_cents == 99900: report_type_code = 'premium_999'
 
     db_request = models.ReportRequest(
         client_name=customer_name,
         client_email=customer_email,
-        company_name=company_name_custom, # Use custom field if provided
+        company_name=company_name_custom,
         report_type=report_type_code,
         request_details=request_details,
         status="PENDING", # Set to PENDING, ready for ReportGenerator
         payment_status="paid",
-        lemonsqueezy_order_id=str(ls_order_id)
-        # lemonsqueezy_checkout_id = ? # Can get this from checkout creation if stored
+        lemonsqueezy_order_id=str(ls_order_id),
+        order_total_cents=order_total_cents # Store actual paid amount
     )
     db.add(db_request)
     await db.flush()
@@ -93,7 +104,7 @@ async def get_pending_report_request(db: AsyncSession) -> Optional[models.Report
         .where(models.ReportRequest.status == 'PENDING')
         .order_by(models.ReportRequest.created_at.asc())
         .limit(1)
-        .with_for_update(skip_locked=True) # Attempt to lock the row
+        .with_for_update(skip_locked=True)
     )
     return result.scalars().first()
 
@@ -105,12 +116,10 @@ async def update_report_request_status(db: AsyncSession, request_id: int, status
     db_request = result.scalars().first()
     if db_request:
         if status: db_request.status = status
-        if output_path: db_request.report_output_path = output_path
-        if error_message: db_request.error_message = error_message
+        if output_path is not None: db_request.report_output_path = output_path # Allow setting path to None
+        if error_message is not None: db_request.error_message = error_message # Allow setting error to None
         if payment_status: db_request.payment_status = payment_status
         if checkout_id: db_request.lemonsqueezy_checkout_id = checkout_id
-        # updated_at is handled by DB onupdate trigger if set up, otherwise:
-        # db_request.updated_at = datetime.datetime.now(datetime.timezone.utc)
         await db.flush()
         await db.refresh(db_request)
     return db_request
@@ -118,38 +127,30 @@ async def update_report_request_status(db: AsyncSession, request_id: int, status
 # --- Prospect CRUD ---
 async def create_prospect(db: AsyncSession, company_name: str, email: Optional[str] = None, website: Optional[str] = None, pain_point: Optional[str] = None, source: Optional[str] = None, linkedin_url: Optional[str] = None, executives: Optional[Dict] = None) -> Optional[models.Prospect]:
     """Creates or updates a prospect."""
-    # Check for existing prospect by email or company name? Decide on uniqueness criteria.
     existing = None
     if email:
         existing = await db.scalar(select(models.Prospect).where(models.Prospect.contact_email == email))
 
     if existing:
-        # Update existing prospect
         print(f"Updating existing prospect: {email or company_name}")
         update_data = {
             "website": website or existing.website,
             "potential_pain_point": pain_point or existing.potential_pain_point,
             "source": source or existing.source,
             "linkedin_profile_url": linkedin_url or existing.linkedin_profile_url,
-            "key_executives": executives or existing.key_executives,
-            # Don't reset status if already contacted etc.
+            "key_executives": executives if executives else existing.key_executives, # Merge/replace? Replace for now.
         }
         for key, value in update_data.items():
-            setattr(existing, key, value)
+            if value is not None: # Only update if new value is provided
+                setattr(existing, key, value)
         await db.flush()
         await db.refresh(existing)
         return existing
     else:
-        # Create new prospect
         db_prospect = models.Prospect(
-            company_name=company_name,
-            website=website,
-            contact_email=email,
-            potential_pain_point=pain_point,
-            source=source,
-            status="NEW",
-            linkedin_profile_url=linkedin_url,
-            key_executives=executives
+            company_name=company_name, website=website, contact_email=email,
+            potential_pain_point=pain_point, source=source, status="NEW",
+            linkedin_profile_url=linkedin_url, key_executives=executives
         )
         db.add(db_prospect)
         await db.flush()
@@ -161,10 +162,10 @@ async def get_new_prospects_for_emailing(db: AsyncSession, limit: int) -> list[m
     result = await db.execute(
         select(models.Prospect)
         .where(models.Prospect.status == 'NEW')
-        .where(models.Prospect.contact_email != None) # Only those with emails
+        .where(models.Prospect.contact_email != None)
         .order_by(models.Prospect.created_at.asc())
         .limit(limit)
-        .with_for_update(skip_locked=True) # Lock rows for processing
+        .with_for_update(skip_locked=True)
     )
     return result.scalars().all()
 
@@ -193,9 +194,9 @@ async def get_active_email_account_for_sending(db: AsyncSession) -> Optional[mod
             (models.EmailAccount.last_reset_date < today) |
             (models.EmailAccount.emails_sent_today < models.EmailAccount.daily_limit)
         )
-        .order_by(models.EmailAccount.last_used_at.asc().nullsfirst()) # Prioritize least recently used
+        .order_by(models.EmailAccount.last_used_at.asc().nullsfirst())
         .limit(1)
-        .with_for_update(skip_locked=True) # Lock the account
+        .with_for_update(skip_locked=True)
     )
     account = result.scalars().first()
 
@@ -212,7 +213,6 @@ async def get_active_email_account_for_sending(db: AsyncSession) -> Optional[mod
 
 async def increment_email_sent_count(db: AsyncSession, account_id: int) -> None:
     """Increments the sent count and updates last used time for an email account."""
-    # Use DB atomic increment if possible, otherwise select-update
     await db.execute(
         text(
             "UPDATE email_accounts "
@@ -221,7 +221,6 @@ async def increment_email_sent_count(db: AsyncSession, account_id: int) -> None:
         ),
         {"now": datetime.datetime.now(datetime.timezone.utc), "account_id": account_id}
     )
-    # No need to flush/refresh if just updating
 
 async def set_email_account_inactive(db: AsyncSession, account_id: int, reason: str) -> None:
     """Marks an email account as inactive."""
@@ -237,7 +236,6 @@ async def set_email_account_inactive(db: AsyncSession, account_id: int, reason: 
             "account_id": account_id
         }
     )
-    # No need to flush/refresh
 
 # --- MCOL CRUD ---
 async def create_kpi_snapshot(db: AsyncSession) -> KpiSnapshot:
@@ -245,7 +243,6 @@ async def create_kpi_snapshot(db: AsyncSession) -> KpiSnapshot:
     now = datetime.datetime.now(datetime.timezone.utc)
     one_day_ago = now - datetime.timedelta(days=1)
 
-    # --- Calculate KPIs (Refined Queries) ---
     report_counts = await db.execute(
         select(
             func.count().filter(models.ReportRequest.status == 'AWAITING_PAYMENT').label('awaiting_payment'),
@@ -253,10 +250,11 @@ async def create_kpi_snapshot(db: AsyncSession) -> KpiSnapshot:
             func.count().filter(models.ReportRequest.status == 'PROCESSING').label('processing'),
             func.count().filter(models.ReportRequest.status == 'COMPLETED', models.ReportRequest.updated_at >= one_day_ago).label('completed_24h'),
             func.count().filter(models.ReportRequest.status == 'FAILED', models.ReportRequest.updated_at >= one_day_ago).label('failed_24h'),
-            func.count().filter(models.ReportRequest.payment_status == 'paid', models.ReportRequest.created_at >= one_day_ago).label('orders_created_24h'), # Count paid orders
+            func.count().filter(models.ReportRequest.payment_status == 'paid', models.ReportRequest.created_at >= one_day_ago).label('orders_created_24h'),
+            # Sum actual paid amounts stored from webhook
             func.sum(
-                cast(text("substring(report_type from '(\\d+)$')"), SQLInteger) / 100.0 # Extract price and convert cents to dollars
-            ).filter(models.ReportRequest.payment_status == 'paid', models.ReportRequest.created_at >= one_day_ago).label('revenue_24h') # Sum price from paid orders
+                 models.ReportRequest.order_total_cents / 100.0 # Convert cents to dollars
+            ).filter(models.ReportRequest.payment_status == 'paid', models.ReportRequest.created_at >= one_day_ago).label('revenue_24h')
         )
     )
     report_kpis = report_counts.first()
@@ -286,16 +284,16 @@ async def create_kpi_snapshot(db: AsyncSession) -> KpiSnapshot:
     bounce_rate_24h = (float(email_kpis.bounced_24h) / float(email_kpis.contacted_total_24h) * 100.0) if email_kpis.contacted_total_24h and email_kpis.contacted_total_24h > 0 else 0.0
 
     snapshot = KpiSnapshot(
-        awaiting_payment_reports=report_kpis.awaiting_payment,
-        pending_reports=report_kpis.pending,
-        processing_reports=report_kpis.processing,
-        completed_reports_24h=report_kpis.completed_24h,
-        failed_reports_24h=report_kpis.failed_24h,
+        awaiting_payment_reports=report_kpis.awaiting_payment or 0,
+        pending_reports=report_kpis.pending or 0,
+        processing_reports=report_kpis.processing or 0,
+        completed_reports_24h=report_kpis.completed_24h or 0,
+        failed_reports_24h=report_kpis.failed_24h or 0,
         avg_report_time_seconds=avg_report_time_seconds,
-        new_prospects_24h=new_prospects_24h,
-        emails_sent_24h=email_kpis.sent_24h,
-        active_email_accounts=account_kpis.active,
-        deactivated_accounts_24h=account_kpis.deactivated_24h,
+        new_prospects_24h=new_prospects_24h or 0,
+        emails_sent_24h=email_kpis.sent_24h or 0,
+        active_email_accounts=account_kpis.active or 0,
+        deactivated_accounts_24h=account_kpis.deactivated_24h or 0,
         bounce_rate_24h=bounce_rate_24h,
         revenue_24h=report_kpis.revenue_24h or 0.0,
         orders_created_24h=report_kpis.orders_created_24h or 0
@@ -307,9 +305,10 @@ async def create_kpi_snapshot(db: AsyncSession) -> KpiSnapshot:
 
 async def log_mcol_decision(db: AsyncSession, kpi_snapshot_id: Optional[int] = None, **kwargs) -> McolDecisionLog:
     """Logs a decision made by the MCOL."""
-    # Ensure generated_strategy is stored as JSON string if it's a list/dict
     if 'generated_strategy' in kwargs and not isinstance(kwargs['generated_strategy'], str):
         kwargs['generated_strategy'] = json.dumps(kwargs['generated_strategy'])
+    if 'action_parameters' in kwargs and not isinstance(kwargs['action_parameters'], (str, type(None))):
+         kwargs['action_parameters'] = json.dumps(kwargs['action_parameters']) # Ensure params are JSON serializable
 
     decision = McolDecisionLog(kpi_snapshot_id=kpi_snapshot_id, **kwargs)
     db.add(decision)
@@ -322,9 +321,11 @@ async def update_mcol_decision_log(db: AsyncSession, log_id: int, **kwargs) -> O
     result = await db.execute(select(McolDecisionLog).where(McolDecisionLog.log_id == log_id))
     log_entry = result.scalars().first()
     if log_entry:
-        # Ensure generated_strategy is stored as JSON string if updated
         if 'generated_strategy' in kwargs and not isinstance(kwargs['generated_strategy'], str):
             kwargs['generated_strategy'] = json.dumps(kwargs['generated_strategy'])
+        if 'action_parameters' in kwargs and not isinstance(kwargs['action_parameters'], (str, type(None))):
+             kwargs['action_parameters'] = json.dumps(kwargs['action_parameters'])
+
         for key, value in kwargs.items():
             setattr(log_entry, key, value)
         await db.flush()
