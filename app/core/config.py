@@ -33,6 +33,14 @@ class Settings(BaseSettings):
     MCOL_ANALYSIS_INTERVAL_SECONDS: int = 300 # e.g., 5 minutes
     MCOL_IMPLEMENTATION_MODE: str = "SUGGEST" # "SUGGEST" or "ATTEMPT_EXECUTE"
 
+    LEMONSQUEEZY_API_KEY: Optional[str] = None
+    LEMONSQUEEZY_STORE_ID: Optional[str] = None
+    LEMONSQUEEZY_VARIANT_STANDARD: Optional[str] = None # Variant ID for $499 product
+    LEMONSQUEEZY_VARIANT_PREMIUM: Optional[str] = None # Variant ID for $999 product
+    LEMONSQUEEZY_WEBHOOK_SECRET: Optional[str] = None # For verifying webhooks
+    # Base URL of your deployed agency (for redirects and webhooks)
+    AGENCY_BASE_URL: str = "http://localhost:8000" # !! MUST BE SET IN .ENV FOR PRODUCTION !!
+
     # LLM Configuration (Centralize if not already done)
     LLM_INFERENCE_ENDPOINT: Optional[str] = None
     LLM_API_KEY: Optional[str] = None

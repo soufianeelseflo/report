@@ -1,12 +1,16 @@
 from fastapi import FastAPI, Depends, Request, HTTPException, status
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates # If building a simple HTML UI
 import uvicorn
 import asyncio
 import signal
+import os
 
 from app.core.config import settings
 from app.api.endpoints import requests as api_requests
+# Import payment endpoint if created by MCOL later
+# from app.api.endpoints import payments as api_payments
 from app.db.base import engine as async_engine, Base as db_base # Import engine and Base
 from app.db import models # Ensure models are imported so Base knows about them
 
@@ -23,21 +27,39 @@ app = FastAPI(
 
 # --- API Routers ---
 app.include_router(api_requests.router, prefix=f"{settings.API_V1_STR}/requests", tags=["Report Requests"])
+# MCOL might add payment router later:
+# app.include_router(api_payments.router, prefix=f"{settings.API_V1_STR}/payments", tags=["Payments"])
 
-# --- Simple Control UI (Example using HTML Templates) ---
-# templates = Jinja2Templates(directory="templates") # Create a 'templates' dir if needed
 
-# @app.get("/", response_class=HTMLResponse, include_in_schema=False)
-# async def read_root(request: Request):
-#     # return templates.TemplateResponse("index.html", {"request": request, "workers": worker_tasks.keys()})
-#     return HTMLResponse("<html><body><h1>Agency Control</h1><p>Control endpoints active.</p></body></html>") # Basic HTML
+# --- Static Files (for AI-Generated Website) ---
+# Check if the directory exists (it should be created by Dockerfile)
+STATIC_DIR = "/app/static_website"
+if os.path.exists(STATIC_DIR):
+    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
+    @app.get("/", response_class=HTMLResponse, include_in_schema=False)
+    async def read_index():
+        index_path = os.path.join(STATIC_DIR, "index.html")
+        if os.path.exists(index_path):
+            return FileResponse(index_path)
+        else:
+            # Fallback if MCOL hasn't generated the site yet
+            return HTMLResponse("<html><body><h1>Agency Backend Running</h1><p>Website not generated yet. MCOL will attempt this.</p></body></html>", status_code=200)
+else:
+     @app.get("/", response_class=HTMLResponse, include_in_schema=False)
+     async def read_root_fallback():
+        # Fallback if static dir doesn't exist at all
+        return HTMLResponse("<html><body><h1>Agency Backend Running</h1><p>Static website directory missing.</p></body></html>", status_code=200)
+
+
+# --- Worker Control Endpoints ---
 @app.post("/control/start/{worker_name}", status_code=status.HTTP_200_OK)
 async def start_worker(worker_name: str):
     """Starts a specific background worker."""
     if worker_name in worker_tasks and not worker_tasks[worker_name].done():
         return {"message": f"Worker '{worker_name}' is already running."}
 
+    task = None # Initialize task to None
     if worker_name == "report_generator":
         from app.workers.run_report_worker import run_report_generator_worker
         task = asyncio.create_task(run_report_generator_worker(shutdown_event))
@@ -47,42 +69,21 @@ async def start_worker(worker_name: str):
     elif worker_name == "email_marketer":
         from app.workers.run_email_worker import run_email_marketer_worker
         task = asyncio.create_task(run_email_marketer_worker(shutdown_event))
-    # --- ADD MCOL ---
     elif worker_name == "mcol":
         from app.workers.run_mcol_worker import run_mcol_worker
         task = asyncio.create_task(run_mcol_worker(shutdown_event))
-    # --- END ADD MCOL ---
     else:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Worker '{worker_name}' not found.")
 
-    worker_tasks[worker_name] = task
-    print(f"Started worker: {worker_name}")
-    return {"message": f"Worker '{worker_name}' started."}
-
-# Add "mcol" to the list of workers stoppable via /control/stop/{worker_name} and /control/stop_all
-# (The existing stop logic using shutdown_event already covers this)
-
-@app.post("/control/start/{worker_name}", status_code=status.HTTP_200_OK)
-async def start_worker(worker_name: str):
-    """Starts a specific background worker."""
-    if worker_name in worker_tasks and not worker_tasks[worker_name].done():
-        return {"message": f"Worker '{worker_name}' is already running."}
-
-    if worker_name == "report_generator":
-        from app.workers.run_report_worker import run_report_generator_worker
-        task = asyncio.create_task(run_report_generator_worker(shutdown_event))
-    elif worker_name == "prospect_researcher":
-        from app.workers.run_research_worker import run_prospect_researcher_worker
-        task = asyncio.create_task(run_prospect_researcher_worker(shutdown_event))
-    elif worker_name == "email_marketer":
-        from app.workers.run_email_worker import run_email_marketer_worker
-        task = asyncio.create_task(run_email_marketer_worker(shutdown_event))
+    if task: # Check if task was created successfully
+        worker_tasks[worker_name] = task
+        print(f"Started worker: {worker_name}")
+        return {"message": f"Worker '{worker_name}' started."}
     else:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Worker '{worker_name}' not found.")
+        # This case should ideally not be reached if worker_name is valid
+        # but added for robustness
+        raise HTTPException(status_code=500, detail=f"Failed to create task for worker '{worker_name}'.")
 
-    worker_tasks[worker_name] = task
-    print(f"Started worker: {worker_name}")
-    return {"message": f"Worker '{worker_name}' started."}
 
 @app.post("/control/stop/{worker_name}", status_code=status.HTTP_200_OK)
 async def stop_worker(worker_name: str):
@@ -90,98 +91,103 @@ async def stop_worker(worker_name: str):
     if worker_name not in worker_tasks or worker_tasks[worker_name].done():
         return {"message": f"Worker '{worker_name}' is not running or already stopped."}
 
-    # Signal the worker to stop (workers need to check shutdown_event)
-    # Actual stopping logic is within the worker loop
-    # For immediate stop (less graceful): worker_tasks[worker_name].cancel()
     print(f"Signaling worker '{worker_name}' to stop...")
     # The worker loop itself should check shutdown_event and exit gracefully.
-    # We don't forcefully cancel here unless necessary.
-    return {"message": f"Stop signal sent to worker '{worker_name}'. It will exit on its next cycle."}
+    # We don't forcefully cancel here. The shutdown_event is shared.
+    # Setting it via /stop_all is the primary mechanism.
+    # Stopping individual workers cleanly without a dedicated signal per worker is tricky.
+    # For now, rely on /stop_all or let the task run until next shutdown check.
+    # A more advanced implementation might use task cancellation or dedicated queues/events per worker.
+    return {"message": f"Stop signal sent via shared event (use /stop_all for guaranteed signaling). Worker '{worker_name}' will exit on its next check."}
 
 @app.post("/control/stop_all", status_code=status.HTTP_200_OK)
 async def stop_all_workers():
     """Signals all running background workers to stop."""
-    print("Signaling all workers to stop...")
-    shutdown_event.set() # Signal all workers checking this event
-    # Wait briefly for tasks to potentially finish cleanly
-    await asyncio.sleep(2)
+    print("Signaling all workers to stop via shared shutdown_event...")
+    shutdown_event.set()
+    await asyncio.sleep(2) # Give a moment for loops to check
     stopped_count = 0
+    active_workers = []
     for name, task in worker_tasks.items():
         if not task.done():
-            # Optionally cancel tasks that didn't stop via event
-            # task.cancel()
             print(f"Worker {name} stop signaled.")
             stopped_count += 1
-        # Clear the task entry? Or leave for status checking?
-    # worker_tasks.clear() # Clear tasks after signaling
-    return {"message": f"Stop signal sent to {stopped_count} active workers."}
+            active_workers.append(name)
+        # Optionally remove completed tasks from the dict
+        # elif name in worker_tasks: del worker_tasks[name]
+    # worker_tasks.clear() # Don't clear, allows checking status later if needed
+    return {"message": f"Stop signal sent via shared event. {stopped_count} workers ({', '.join(active_workers)}) should stop on next cycle check."}
 
 
 @app.get("/health", response_model=schemas.HealthCheck, tags=["Health"])
 async def health_check():
     """Basic health check endpoint."""
-    return schemas.HealthCheck(name=settings.PROJECT_NAME, status="OK", version="0.1.0")
-
-# --- Database Initialization (Optional: Create tables on startup if they don't exist) ---
-# This is generally better handled by Alembic migrations, but can be useful for simple setups.
-# async def init_db():
-#     async with async_engine.begin() as conn:
-#         # await conn.run_sync(db_base.metadata.drop_all) # Use with caution!
-#         await conn.run_sync(db_base.metadata.create_all)
-#         print("Database tables checked/created.")
+    # Extended health check could query DB status or worker heartbeats
+    return schemas.HealthCheck(name=settings.PROJECT_NAME, status="OK", version="0.1.0") # Consider adding a real version
 
 @app.on_event("startup")
 async def startup_event():
     print("Starting up Autonomous Agency...")
-    # await init_db() # Uncomment to auto-create tables (ensure models are imported)
     print("Connecting to database...")
-    # Test connection - engine creation already does this implicitly
+    # Test connection implicitly via engine creation + potential first query by workers
     try:
+        # Perform a simple query to ensure connection works before workers start hitting it hard
         async with async_engine.connect() as connection:
-             print("Database connection successful.")
+            await connection.execute(models.select(1)) # Simple test query
+            print("Database connection successful.")
     except Exception as e:
-        print(f"FATAL: Database connection failed: {e}")
-        # Decide how to handle this - exit? retry?
-        # For now, let it proceed but log the error.
-    print("API Ready.")
+        print(f"FATAL: Database connection failed on startup check: {e}")
+        # Consider exiting if DB is critical and unavailable?
+        # raise SystemExit("Database connection failed on startup") from e
+    print("API Ready. Use /control/start/{worker_name} to activate agents.")
 
 
 @app.on_event("shutdown")
 async def shutdown_app_event():
-    print("Shutting down...")
-    shutdown_event.set() # Signal any running workers spawned outside /control
-    # Wait for workers managed by /control to finish (if desired)
-    # tasks = [task for task in worker_tasks.values() if not task.done()]
-    # if tasks:
-    #     print(f"Waiting for {len(tasks)} background tasks to complete...")
-    #     await asyncio.gather(*tasks, return_exceptions=True) # Add timeout?
+    print("Shutdown signal received, initiating graceful shutdown...")
+    if not shutdown_event.is_set():
+        shutdown_event.set() # Ensure event is set
+
+    tasks_to_await = [task for task in worker_tasks.values() if task and not task.done()]
+    if tasks_to_await:
+        print(f"Waiting for {len(tasks_to_await)} background tasks to complete...")
+        # Wait for tasks with a timeout
+        _, pending = await asyncio.wait(tasks_to_await, timeout=10.0)
+        if pending:
+            print(f"Warning: {len(pending)} tasks did not finish gracefully within timeout:")
+            for task in pending:
+                print(f" - Task: {task.get_name()} - Cancelling...")
+                task.cancel()
+                try:
+                    await task # Allow cancellation to propagate
+                except asyncio.CancelledError:
+                    print(f"   - Task {task.get_name()} cancelled.")
+                except Exception as e:
+                    print(f"   - Error during task cancellation/cleanup: {e}")
+
+    print("Disposing database engine...")
     await async_engine.dispose()
     print("Shutdown complete.")
 
 
-# --- Signal Handling for Graceful Shutdown ---
-def handle_signal(sig, frame):
-    print(f"Received signal {sig}, initiating graceful shutdown...")
-    # This function needs to trigger the shutdown logic within the running event loop
-    loop = asyncio.get_running_loop()
-    loop.create_task(shutdown_app_event())
-    # Give tasks time to finish before force exit
-    loop.call_later(5.0, loop.stop) # Force stop loop after 5 seconds if needed
+# --- Signal Handling for Graceful Shutdown (for direct uvicorn run, less relevant in Docker usually) ---
+# def handle_signal(sig, frame):
+#     print(f"Received OS signal {sig}, initiating graceful shutdown...")
+#     # This is tricky to integrate perfectly with Uvicorn's own signal handling
+#     # Best practice in Docker is to rely on Docker sending SIGTERM and Uvicorn handling it.
+#     # If running directly, Uvicorn should handle SIGINT/SIGTERM.
+#     # We ensure our shutdown_event logic runs via app.on_event("shutdown").
+#     pass
 
 # --- Main Execution ---
 if __name__ == "__main__":
-    # Setup signal handlers before starting the server
-    # signal.signal(signal.SIGINT, handle_signal) # Handle Ctrl+C
-    # signal.signal(signal.SIGTERM, handle_signal) # Handle termination signal (e.g., from Docker)
-
+    # Signal handling setup might interfere with Uvicorn's internal handling if run directly.
+    # Rely on Uvicorn's default signal handling.
     print(f"Starting Uvicorn server for {settings.PROJECT_NAME}...")
     uvicorn.run(
         "main:app",
         host="0.0.0.0",
         port=8000,
-        reload=False, # Set reload=True ONLY for development
-        workers=1 # Run with a single worker process for simplicity with async tasks
+        reload=False, # Production: reload=False
+        workers=1 # Essential for shared asyncio event loop and state (worker_tasks)
     )
-    # Note: Graceful shutdown with Uvicorn workers and asyncio tasks requires careful handling.
-    # The setup above is basic. For production, consider libraries like 'uvicorn[standard]'
-    # and potentially running workers in separate processes/containers managed by docker-compose.

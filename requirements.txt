@@ -23,5 +23,8 @@ python-dotenv==1.0.1
 tenacity==8.3.0 # For retries
 pycryptodome==3.20.0 # For potential encryption of sensitive data like SMTP passwords
 
+# Payment Integration
+lemonsqueezy.py==1.1.0 # Add Lemon Squeezy library
+
 # Git interaction (if needed for repo updates)
 # GitPython==3.1.43

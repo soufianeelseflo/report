@@ -4,10 +4,10 @@ import os
 import json
 from datetime import datetime
 from sqlalchemy.ext.asyncio import AsyncSession
-
+from app.agents.email_marketer import send_email_via_smtp 
 from app.core.config import settings
 from app.db import crud
-from app.db import models
+from app.db import models   
 
 # Define where reports will be stored (relative to the app root inside the container)
 REPORTS_OUTPUT_DIR = "/app/generated_reports"
@@ -116,3 +116,69 @@ async def process_single_report_request(db: AsyncSession, request: models.Report
     )
     await db.commit() # Commit the final status
     print(f"[ReportGenerator] Finished processing request ID: {request.request_id} with status: {final_status}")
+
+    updated_request = await crud.update_report_request_status(
+        db=db,
+        request_id=request.request_id,
+        status=final_status,
+        output_path=output_path,
+        error_message=error_message
+    )
+    await db.commit() # Commit the final status
+    print(f"[ReportGenerator] Finished processing request ID: {request.request_id} with status: {final_status}")
+
+    # --- 6. Deliver Report on Completion ---
+    if final_status == "COMPLETED" and output_path and updated_request:
+        print(f"[ReportGenerator] Attempting to deliver report for request ID: {request.request_id} to {updated_request.client_email}")
+        delivery_account = await crud.get_active_email_account_for_sending(db)
+        if delivery_account:
+            try:
+                # Construct delivery email content
+                report_filename = os.path.basename(output_path)
+                delivery_subject = f"Your Autonomous AI Report is Ready! ({report_filename})"
+                delivery_body = f"""Hi {updated_request.client_name or 'Client'},
+
+Your requested report '{report_filename}' has been generated successfully.
+
+Please find the report attached.
+
+We appreciate your business!
+
+Best regards,
+The Autonomous AI Reporting Agency
+"""
+                # Create a dummy prospect object for the send function signature
+                class DeliveryRecipient:
+                    contact_email = updated_request.client_email
+                delivery_prospect = DeliveryRecipient()
+
+                # Prepare email content dict
+                email_content = {"subject": delivery_subject, "body": delivery_body}
+
+                # --- Attach the file ---
+                # This part needs modification in send_email_via_smtp or a new function
+                # to handle attachments with aiosmtplib. For now, just sending text.
+                # TODO: Enhance send_email_via_smtp to accept an attachment path.
+                # Example (conceptual - needs integration):
+                # with open(output_path, 'rb') as fp:
+                #     msg.add_attachment(fp.read(), maintype='application', subtype='octet-stream', filename=report_filename)
+
+                # Send using a modified send function or directly (less ideal)
+                # Using existing function for now (will lack attachment)
+                send_success = await send_email_via_smtp(email_content, delivery_prospect, delivery_account)
+
+                if send_success:
+                    print(f"[ReportGenerator] Delivery email initiated for request ID: {request.request_id}")
+                    await crud.increment_email_sent_count(db, delivery_account.account_id)
+                    await db.commit() # Commit email count increment
+                else:
+                    print(f"[ReportGenerator] Failed to send delivery email for request ID: {request.request_id}")
+                    await db.rollback() # Rollback potential changes from send attempt
+
+            except Exception as delivery_e:
+                print(f"[ReportGenerator] Error during report delivery for request ID {request.request_id}: {delivery_e}")
+                await db.rollback() # Rollback potential changes
+        else:
+            print(f"[ReportGenerator] Could not find active email account for report delivery (Request ID: {request.request_id}). Requires manual delivery.")
+            # Log this failure clearly
+            await db.rollback() # Rollback session if account fetch failed

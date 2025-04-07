@@ -19,7 +19,69 @@ async def create_report_request(db: AsyncSession, request: schemas.ReportRequest
     db.add(db_request)
     await db.flush() # Flush to get the ID without full commit yet
     await db.refresh(db_request)
+    return db_request   
+
+# ... imports ..    .
+
+# Modify create_report_request or add a new function for webhook creation
+async def create_report_request_from_webhook(
+    db: AsyncSession,
+    order_data: dict # Parsed data from Lemon Squeezy webhook
+) -> Optional[models.ReportRequest]:
+    """Creates a report request after successful payment via webhook."""
+
+    ls_order_id = order_data.get('id')
+    if not ls_order_id: return None # Should not happen
+
+    # Check if order already processed
+    existing = await db.scalar(select(models.ReportRequest).where(models.ReportRequest.lemonsqueezy_order_id == ls_order_id))
+    if existing:
+        print(f"[Webhook] Order ID {ls_order_id} already processed. Skipping.")
+        return None
+
+    # Extract necessary details from webhook payload
+    # Adjust keys based on actual Lemon Squeezy 'order_created' payload structure
+    attributes = order_data.get('attributes', {})
+    customer_email = attributes.get('user_email')
+    customer_name = attributes.get('user_name')
+    product_name = attributes.get('first_order_item', {}).get('product_name', 'Unknown Product')
+    variant_name = attributes.get('first_order_item', {}).get('variant_name', 'Unknown Variant')
+    # --- CRUCIAL: Get the custom data (research details) ---
+    # This assumes you configure Lemon Squeezy checkout to collect custom fields
+    # and they appear in the webhook payload under 'custom_data' or similar.
+    custom_data = attributes.get('custom_data', {})
+    request_details = custom_data.get('research_topic', 'Not Provided - Check Order Notes') # Adjust key 'research_topic'
+
+    if not customer_email:
+        print(f"[Webhook] Error: Missing customer email for order {ls_order_id}.")
+        return None # Cannot proceed without email
+
+    # Determine report type based on product/variant name (needs adjustment)
+    report_type = f"{product_name} - {variant_name}"
+    if "Standard" in report_type:
+        report_type_code = 'standard_499'
+    elif "Premium" in report_type:
+        report_type_code = 'premium_999'
+    else:
+        report_type_code = 'unknown_paid' # Fallback
+
+    db_request = models.ReportRequest(
+        client_name=customer_name,
+        client_email=customer_email,
+        # company_name= ? # Maybe collect this as custom data too?
+        report_type=report_type_code,
+        request_details=request_details,
+        status="PENDING", # Set to PENDING, ready for ReportGenerator
+        payment_status="paid",
+        lemonsqueezy_order_id=ls_order_id
+    )
+    db.add(db_request)
+    await db.flush()
+    await db.refresh(db_request)
+    print(f"[Webhook] Created ReportRequest ID {db_request.request_id} from LS Order {ls_order_id}")
     return db_request
+
+# ... other CRUD functions ...
 
 # --- Add other CRUD functions for agents later ---
 
