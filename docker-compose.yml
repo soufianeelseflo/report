@@ -3,18 +3,16 @@ version: '3.8'
 services:
   db:
     image: postgres:15-alpine # Using alpine for smaller image size
-    container_name: agency_db
+    container_name: acumenis_db # UPDATED NAME
     volumes:
       - postgres_data:/var/lib/postgresql/data
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:-agencydb} # Use .env value or default
-      POSTGRES_USER: ${POSTGRES_USER:-agencyuser}
+      POSTGRES_DB: ${POSTGRES_DB:-acumenisdb} # UPDATED DEFAULT
+      POSTGRES_USER: ${POSTGRES_USER:-acumenisuser} # UPDATED DEFAULT
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-supersecretpassword} # Ensure this matches .env
     ports:
       - "${POSTGRES_PORT:-5432}:5432" # Expose DB port only if needed externally
     healthcheck:
-      # Use pg_isready for healthcheck - requires postgresql-client in app image or separate check
-      # Using the check within the DB container itself is simpler if not exposing port
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 10s
       timeout: 5s
@@ -23,9 +21,9 @@ services:
 
   app:
     build:
-      context: . # Build context is the root directory containing Dockerfile, autonomous_agency, open-deep-research
+      context: . # Build context is the root directory containing Dockerfile, Acumenis, open-deep-research
       dockerfile: Dockerfile # Dockerfile is now at the root
-    container_name: agency_app
+    container_name: acumenis_app # UPDATED NAME
     env_file:
       - .env # .env file is now at the root
     depends_on:
@@ -33,7 +31,6 @@ services:
         condition: service_healthy # Wait for db healthcheck to pass
     ports:
       - "8000:8000" # Map host port 8000 to container port 8000
-    # No volume mount for code in production - code is copied in Dockerfile
     restart: unless-stopped
     # The command is now handled by the ENTRYPOINT script in the Dockerfile
 

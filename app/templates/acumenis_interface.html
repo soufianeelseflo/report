@@ -1,0 +1,1000 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Acumenis // AI Insight Engine</title>
+    <meta name="description"
+        content="Acumenis: Real-time AI market analysis & competitor intelligence. Initiate deep research streams and receive actionable insights in hours.">
+    <meta name="keywords"
+        content="Acumenis, AI research, market analysis, competitor intelligence, autonomous AI, business insights, strategic reporting, real-time data, AI engine">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;900&family=Roboto+Mono:wght@400;700&display=swap"
+        rel="stylesheet">
+    <!-- Alpine.js via CDN -->
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.13.10/dist/cdn.min.js"></script>
+    <style>
+        :root {
+            --bg-primary: #020617;
+            /* Slate 950 */
+            --bg-secondary: #0f172a;
+            /* Slate 900 */
+            --bg-tertiary: #1e293b;
+            /* Slate 800 */
+            --border-color: #334155;
+            /* Slate 700 */
+            --text-primary: #f1f5f9;
+            /* Slate 100 */
+            --text-secondary: #cbd5e1;
+            /* Slate 300 */
+            --text-muted: #94a3b8;
+            /* Slate 400 */
+            --accent-cyan: #22d3ee;
+            /* Cyan 400 */
+            --accent-blue: #60a5fa;
+            /* Blue 400 */
+            --accent-emerald: #34d399;
+            /* Emerald 400 */
+            --accent-amber: #facc15;
+            /* Amber 400 */
+            --font-sans: 'Inter', sans-serif;
+            --font-mono: 'Roboto Mono', monospace;
+        }
+
+        *,
+        *::before,
+        *::after {
+            box-sizing: border-box;
+        }
+
+        html {
+            scroll-behavior: smooth;
+        }
+
+        body {
+            font-family: var(--font-sans);
+            line-height: 1.7;
+            margin: 0;
+            padding: 0;
+            background-color: var(--bg-primary);
+            color: var(--text-secondary);
+            font-size: 16px;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+            overflow-x: hidden;
+            background-image: radial-gradient(circle at 1px 1px, var(--border-color) 1px, transparent 0);
+            background-size: 25px 25px;
+            /* Subtle grid background */
+        }
+
+        .container {
+            max-width: 1320px;
+            margin: 0 auto;
+            padding: 0 24px;
+            position: relative;
+            z-index: 2;
+        }
+
+        h1,
+        h2,
+        h3,
+        h4 {
+            margin-top: 0;
+            line-height: 1.3;
+            color: var(--text-primary);
+            font-weight: 700;
+        }
+
+        h1 {
+            font-size: 3.8rem;
+            font-weight: 900;
+            letter-spacing: -0.025em;
+        }
+
+        h2 {
+            font-size: 2.5rem;
+            text-align: center;
+            margin-bottom: 1.5rem;
+            font-weight: 700;
+        }
+
+        p {
+            margin-top: 0;
+            margin-bottom: 1.25rem;
+        }
+
+        a {
+            color: var(--accent-cyan);
+            text-decoration: none;
+            transition: color 0.3s ease;
+        }
+
+        a:hover {
+            color: #67e8f9;
+            /* Lighter Cyan */
+        }
+
+        section {
+            padding: 100px 0;
+            position: relative;
+            overflow: hidden;
+        }
+
+        section::before {
+            /* Abstract background shapes */
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: radial-gradient(ellipse at 30% 20%, rgba(56, 189, 248, 0.1), transparent 70%),
+                radial-gradient(ellipse at 70% 80%, rgba(52, 211, 153, 0.08), transparent 70%);
+            z-index: 0;
+            opacity: 0.7;
+        }
+
+        .section-subtitle {
+            text-align: center;
+            font-size: 1.2rem;
+            color: var(--text-muted);
+            max-width: 800px;
+            margin: 0 auto 60px auto;
+        }
+
+        /* --- Header --- */
+        header {
+            background-color: rgba(2, 6, 23, 0.8);
+            backdrop-filter: blur(12px);
+            padding: 20px 0;
+            border-bottom: 1px solid var(--border-color);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        .header-content {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .logo {
+            font-size: 1.9rem;
+            font-weight: 900;
+            color: var(--text-primary);
+            letter-spacing: -0.05em;
+        }
+
+        .logo .highlight {
+            color: var(--accent-cyan);
+        }
+
+        .nav-links a {
+            color: var(--text-secondary);
+            margin-left: 35px;
+            font-weight: 600;
+            font-size: 0.95rem;
+        }
+
+        .nav-links a:hover {
+            color: var(--white);
+        }
+
+        .header-cta {
+            background: linear-gradient(to right, var(--accent-cyan), var(--accent-blue));
+            color: var(--bg-primary);
+            padding: 12px 24px;
+            border-radius: 6px;
+            font-weight: 700;
+            transition: all 0.3s ease;
+            font-size: 0.95rem;
+        }
+
+        .header-cta:hover {
+            text-decoration: none;
+            box-shadow: 0 0 20px rgba(34, 211, 238, 0.5);
+            transform: translateY(-2px);
+        }
+
+        /* --- Hero Section --- */
+        .hero {
+            text-align: center;
+            padding: 140px 0 160px 0;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .hero h1 {
+            margin-bottom: 24px;
+        }
+
+        .hero p.subtitle {
+            font-size: 1.4rem;
+            margin-bottom: 45px;
+            max-width: 850px;
+            margin-left: auto;
+            margin-right: auto;
+            color: var(--text-secondary);
+        }
+
+        .hero .cta-button {
+            padding: 22px 44px;
+            font-size: 1.25rem;
+            background: linear-gradient(to right, var(--accent-cyan), var(--accent-blue));
+            color: var(--bg-primary);
+            font-weight: 700;
+        }
+
+        .hero .cta-button:hover {
+            box-shadow: 0 0 25px rgba(56, 189, 248, 0.6);
+        }
+
+        .console-input-visual {
+            font-family: var(--font-mono);
+            background-color: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 15px 20px;
+            max-width: 700px;
+            margin: 40px auto 0 auto;
+            text-align: left;
+            color: var(--text-muted);
+            font-size: 0.95rem;
+        }
+
+        .console-input-visual::before {
+            content: '> ';
+            color: var(--accent-cyan);
+        }
+
+        .console-input-visual .placeholder-text {
+            opacity: 0.6;
+        }
+
+        /* --- Capabilities --- */
+        #capabilities {
+            background-color: var(--bg-secondary);
+        }
+
+        .capabilities-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 35px;
+        }
+
+        .capability-item {
+            background: var(--bg-tertiary);
+            padding: 35px;
+            border-radius: 10px;
+            border: 1px solid var(--border-color);
+            transition: transform 0.3s ease, border-color 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .capability-item::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            left: -50%;
+            width: 200%;
+            height: 200%;
+            background: radial-gradient(circle, rgba(34, 211, 238, 0.08), transparent 40%);
+            transition: opacity 0.5s ease;
+            opacity: 0;
+            z-index: 0;
+            animation: rotate 15s linear infinite;
+        }
+
+        .capability-item:hover::before {
+            opacity: 1;
+        }
+
+        .capability-item>* {
+            position: relative;
+            z-index: 1;
+        }
+
+        /* Keep content above pseudo-element */
+        .capability-item:hover {
+            transform: translateY(-6px);
+            border-color: var(--accent-cyan);
+        }
+
+        .capability-item .icon {
+            font-size: 2.8rem;
+            margin-bottom: 20px;
+            color: var(--accent-cyan);
+            display: block;
+        }
+
+        .capability-item h3 {
+            font-size: 1.4rem;
+            margin-bottom: 15px;
+            color: var(--text-primary);
+        }
+
+        .capability-item p {
+            font-size: 1rem;
+            color: var(--text-secondary);
+        }
+
+        /* --- Pricing Tiers --- */
+        #pricing {
+            background-color: var(--bg-primary);
+        }
+
+        .pricing-table {
+            display: flex;
+            justify-content: center;
+            gap: 40px;
+            flex-wrap: wrap;
+            align-items: stretch;
+        }
+
+        .pricing-plan {
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 40px;
+            text-align: center;
+            width: 100%;
+            max-width: 420px;
+            background: var(--bg-secondary);
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+
+        .pricing-plan:hover {
+            transform: translateY(-8px);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+        }
+
+        .pricing-plan.premium {
+            border-color: var(--accent-emerald);
+            border-width: 2px;
+        }
+
+        .pricing-plan h3 {
+            font-size: 1.8rem;
+            font-weight: 700;
+            color: var(--text-primary);
+            margin-bottom: 10px;
+        }
+
+        .pricing-plan .plan-desc {
+            font-size: 1rem;
+            color: var(--text-muted);
+            margin-bottom: 25px;
+            min-height: 40px;
+        }
+
+        .pricing-plan .price {
+            font-size: 3.8rem;
+            font-weight: 800;
+            color: var(--accent-emerald);
+            margin-bottom: 5px;
+            line-height: 1;
+        }
+
+        .pricing-plan .price-term {
+            font-size: 0.9em;
+            color: var(--text-muted);
+            margin-bottom: 15px;
+        }
+
+        .pricing-plan .anchor-price {
+            text-decoration: line-through;
+            color: var(--text-muted);
+            font-size: 1em;
+            margin-bottom: 25px;
+            display: block;
+            opacity: 0.7;
+        }
+
+        .pricing-plan ul {
+            list-style: none;
+            padding: 0;
+            margin: 30px 0;
+            color: var(--text-secondary);
+            text-align: left;
+            flex-grow: 1;
+            font-size: 1rem;
+        }
+
+        .pricing-plan ul li {
+            margin-bottom: 15px;
+            display: flex;
+            align-items: flex-start;
+        }
+
+        .pricing-plan ul li::before {
+            content: '✓';
+            color: var(--accent-emerald);
+            margin-right: 12px;
+            font-weight: bold;
+            flex-shrink: 0;
+            margin-top: 4px;
+        }
+
+        .pricing-plan .cta-button {
+            margin-top: auto;
+            width: 100%;
+            background: var(--accent-emerald);
+            color: var(--bg-primary);
+            font-weight: 700;
+        }
+
+        .pricing-plan .cta-button:hover {
+            background: #059669;
+            box-shadow: 0 0 15px rgba(52, 211, 153, 0.4);
+        }
+
+        .pricing-plan.standard .price {
+            color: var(--accent-blue);
+        }
+
+        .pricing-plan.standard .cta-button {
+            background: var(--accent-blue);
+            color: var(--white);
+        }
+
+        .pricing-plan.standard .cta-button:hover {
+            background: #2563eb;
+            box-shadow: 0 0 15px rgba(56, 189, 248, 0.4);
+        }
+
+        .pricing-plan.standard ul li::before {
+            color: var(--accent-blue);
+        }
+
+        /* --- Order Form --- */
+        #order {
+            background: linear-gradient(var(--bg-secondary), var(--bg-tertiary));
+        }
+
+        #report-order-form {
+            max-width: 800px;
+            margin: 0 auto;
+            background: var(--bg-secondary);
+            padding: 50px 60px;
+            border-radius: 12px;
+            border: 1px solid var(--border-color);
+            box-shadow: 0 15px 35px rgba(0, 0, 0, 0.2);
+        }
+
+        .form-group label {
+            color: var(--text-secondary);
+            font-weight: 500;
+        }
+
+        .form-group input[type="text"],
+        .form-group input[type="email"],
+        .form-group select,
+        .form-group textarea {
+            background-color: var(--bg-tertiary);
+            border-color: var(--border-color);
+            color: var(--text-primary);
+            padding: 16px;
+            font-size: 1rem;
+            border-radius: 8px;
+        }
+
+        .form-group input:focus,
+        .form-group select:focus,
+        .form-group textarea:focus {
+            border-color: var(--accent-cyan);
+            outline: none;
+            box-shadow: 0 0 0 3px rgba(34, 211, 238, 0.3);
+            background-color: var(--bg-medium);
+        }
+
+        .form-group textarea {
+            min-height: 180px;
+            resize: vertical;
+            font-family: inherit;
+        }
+
+        #submit-order-btn {
+            background: linear-gradient(to right, var(--accent-amber), #fde047);
+            color: var(--secondary-color);
+            font-weight: 700;
+            padding: 18px;
+            font-size: 1.2rem;
+            border: none;
+            cursor: pointer;
+            border-radius: 8px;
+            transition: all 0.3s ease;
+            width: 100%;
+        }
+
+        #submit-order-btn:hover {
+            box-shadow: 0 8px 15px rgba(250, 204, 21, 0.3);
+            transform: translateY(-2px);
+        }
+
+        #submit-order-btn:disabled {
+            background: var(--bg-light);
+            color: var(--text-muted);
+            cursor: not-allowed;
+            opacity: 0.7;
+            transform: none;
+            box-shadow: none;
+        }
+
+        #form-message {
+            margin-top: 25px;
+            padding: 14px;
+            border-radius: 6px;
+            text-align: center;
+            font-weight: 600;
+            display: none;
+            font-size: 1em;
+        }
+
+        #form-message.success {
+            background-color: #166534;
+            color: #dcfce7;
+            border: 1px solid #4ade80;
+        }
+
+        #form-message.error {
+            background-color: #991b1b;
+            color: #fee2e2;
+            border: 1px solid #f87171;
+        }
+
+        #form-message.info {
+            background-color: #075985;
+            color: #e0f2fe;
+            border: 1px solid #38bdf8;
+        }
+
+        .trust-badges {
+            text-align: center;
+            margin-top: 40px;
+            display: flex;
+            justify-content: center;
+            gap: 40px;
+            flex-wrap: wrap;
+        }
+
+        .trust-badge {
+            color: var(--text-muted);
+            font-weight: 600;
+            font-size: 0.95em;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .trust-badge .icon {
+            font-size: 1.5em;
+            color: var(--accent-cyan);
+        }
+
+        /* --- Footer --- */
+        footer {
+            background-color: var(--bg-secondary);
+            border-top: 1px solid var(--border-color);
+        }
+
+        footer a {
+            color: var(--text-secondary);
+        }
+
+        footer a:hover {
+            color: var(--white);
+        }
+
+        /* --- Animations --- */
+        @keyframes rotate {
+            from {
+                transform: rotate(0deg);
+            }
+
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        @keyframes pulse {
+
+            0%,
+            100% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: .5;
+            }
+        }
+
+        .pulse {
+            animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+
+        /* --- Responsive --- */
+        @media (max-width: 992px) {
+            h1 {
+                font-size: 3rem;
+            }
+
+            h2 {
+                font-size: 2.2rem;
+            }
+
+            section {
+                padding: 80px 0;
+            }
+
+            .pricing-table {
+                gap: 25px;
+            }
+
+            .pricing-plan {
+                max-width: 360px;
+                padding: 35px;
+            }
+        }
+
+        @media (max-width: 768px) {
+            body {
+                font-size: 15px;
+            }
+
+            h1 {
+                font-size: 2.5rem;
+            }
+
+            .hero h1 {
+                font-size: 2.8rem;
+            }
+
+            .hero p.subtitle {
+                font-size: 1.1rem;
+            }
+
+            h2 {
+                font-size: 2rem;
+            }
+
+            .section-subtitle {
+                font-size: 1rem;
+                margin-bottom: 40px;
+            }
+
+            .nav-links {
+                display: none;
+            }
+
+            header {
+                padding: 15px 0;
+            }
+
+            .logo {
+                font-size: 1.6rem;
+            }
+
+            .header-cta {
+                display: none;
+            }
+
+            .capabilities-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .pricing-table {
+                flex-direction: column;
+                align-items: center;
+            }
+
+            .pricing-plan {
+                width: 95%;
+                max-width: 450px;
+                margin-bottom: 25px;
+            }
+
+            #report-order-form {
+                padding: 35px 25px;
+            }
+
+            .trust-badges {
+                gap: 20px;
+                flex-direction: column;
+                align-items: center;
+            }
+        }
+    </style>
+</head>
+
+<body x-data="{ currentPlan: '', formMessage: '', formMessageType: '', formSubmitting: false }">
+
+    <header>
+        <div class="container header-content">
+            <a href="#hero" class="logo">Acumenis<span class="highlight">.</span></a>
+            <nav class="nav-links">
+                <a href="#capabilities">Capabilities</a>
+                <a href="#pricing">Tiers</a>
+                <a href="#order">Initiate</a>
+            </nav>
+            <a href="#order" class="cta-button header-cta">Initiate Analysis</a>
+        </div>
+    </header>
+
+    <main>
+        <section class="hero" id="hero">
+            <div class="container">
+                <h1>Acumenis: AI Insight Engine</h1>
+                <p class="subtitle">Intelligence Delivered at <span class="highlight">Machine Speed</span>. Gain
+                    unparalleled market clarity and competitor insights in hours, not weeks.</p>
+                <a href="#order" @click="currentPlan = ''" class="cta-button">Initiate Your First Analysis</a>
+                <div class="console-input-visual">
+                    <span class="placeholder-text">analyze competitors(market="SaaS Accounting UK",
+                        focus="pricing_strategy")...</span>
+                </div>
+            </div>
+        </section>
+
+        <section id="capabilities">
+            <div class="container">
+                <h2>Intelligence Streams</h2>
+                <p class="section-subtitle">Access diverse, AI-synthesized data streams tailored to your strategic
+                    imperatives.</p>
+                <div class="capabilities-grid">
+                    <div class="capability-item">
+                        <span class="icon">📈</span>
+                        <h3>Market Trajectory Analysis</h3>
+                        <p>Map market size, growth vectors, TAM/SAM/SOM, and identify emergent opportunities with
+                            predictive modeling.</p>
+                    </div>
+                    <div class="capability-item">
+                        <span class="icon">🎯</span>
+                        <h3>Competitor Vector Scan</h3>
+                        <p>Deconstruct competitor strategies, product roadmaps, market positioning, and potential
+                            vulnerabilities.</p>
+                    </div>
+                    <div class="capability-item">
+                        <span class="icon">💡</span>
+                        <h3>Predictive Trend Synthesis</h3>
+                        <p>Detect weak signals and forecast disruptive shifts using AI pattern analysis across diverse
+                            datasets.</p>
+                    </div>
+                    <div class="capability-item">
+                        <span class="icon">⚙️</span>
+                        <h3>Custom Intelligence Synthesis</h3>
+                        <p>Define your specific parameters; our AI core generates bespoke reports answering your most
+                            critical questions.</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section id="pricing">
+            <div class="container">
+                <h2>Select Your Intelligence Tier</h2>
+                <p class="section-subtitle">Choose the analysis depth and speed required. Both tiers leverage our core
+                    AI engine for maximum impact.</p>
+                <div class="pricing-table">
+                    <div class="pricing-plan standard">
+                        <h3>Standard Synthesis</h3>
+                        <p class="plan-desc">Rapid, focused intelligence for tactical decisions and market awareness.
+                        </p>
+                        <div class="price">$499</div>
+                        <div class="price-term">One-Time Analysis</div>
+                        <div class="anchor-price"><s>$1497 Industry Value</s></div>
+                        <ul>
+                            <li>Core Market Landscape Scan</li>
+                            <li>Top 3-5 Competitor Vectors</li>
+                            <li>Key Trend Identification</li>
+                            <li>Standard AI Synthesis</li>
+                            <li>Sourced Data References</li>
+                            <li>Turnaround: ~12 Business Hours</li>
+                            <li>Format: PDF Synthesis Report</li>
+                        </ul>
+                        <button
+                            @click="currentPlan = 'standard_499'; document.getElementById('order').scrollIntoView({ behavior: 'smooth' });"
+                            class="cta-button">Initiate Standard</button>
+                    </div>
+
+                    <div class="pricing-plan premium">
+                        <!-- <div class="premium-badge">Premium</div> -->
+                        <h3>Premium Singularity</h3>
+                        <p class="plan-desc">Maximum depth analysis with strategic foresight for critical initiatives.
+                        </p>
+                        <div class="price">$999</div>
+                        <div class="price-term">One-Time Analysis</div>
+                        <div class="anchor-price"><s>$2997 Industry Value</s></div>
+                        <ul>
+                            <li>Deep Market Segmentation & Sizing</li>
+                            <li>Extensive Competitor Deconstruction (5-10+)</li>
+                            <li>Predictive Trend Modeling & Scenarios</li>
+                            <li>Maximum AI Synthesis Depth & Nuance</li>
+                            <li>Actionable Strategic Recommendations</li>
+                            <li>SWOT / PESTLE Framework Integration</li>
+                            <li>Raw Data Export Option</li>
+                            <li>Priority Turnaround: < 6 Business Hours</li>
+                            <li>Format: PDF Report + Data Files + Exec Brief</li>
+                        </ul>
+                        <button
+                            @click="currentPlan = 'premium_999'; document.getElementById('order').scrollIntoView({ behavior: 'smooth' });"
+                            class="cta-button">Initiate Premium</button>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section id="order">
+            <div class="container">
+                <h2>Initiate Analysis Stream</h2>
+                <p class="section-subtitle">Define your intelligence parameters. Our AI begins synthesis immediately
+                    upon secure payment confirmation via Lemon Squeezy.</p>
+
+                <form id="report-order-form" @submit.prevent="submitOrder">
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label for="name">Contact Name *</label>
+                            <input type="text" id="name" name="name" required x-model="formData.client_name">
+                        </div>
+                        <div class="form-group">
+                            <label for="email">Business Email *</label>
+                            <input type="email" id="email" name="email" required placeholder="Report delivered here"
+                                x-model="formData.client_email">
+                        </div>
+                    </div>
+                    <div class="form-group full-width">
+                        <label for="company_name">Company Name (Optional)</label>
+                        <input type="text" id="company_name" name="company_name" placeholder="For report context"
+                            x-model="formData.company_name">
+                    </div>
+                    <div class="form-group full-width">
+                        <label for="report_type">Select Intelligence Tier *</label>
+                        <select id="report_type" name="report_type" required x-model="formData.report_type"
+                            x-init="if (currentPlan) formData.report_type = currentPlan">
+                            <option value="" disabled>-- Choose Report Depth --</option>
+                            <option value="standard_499">Standard Synthesis ($499)</option>
+                            <option value="premium_999">Premium Singularity ($999)</option>
+                        </select>
+                    </div>
+                    <div class="form-group full-width">
+                        <label for="request_details">Intelligence Objective & Parameters *</label>
+                        <textarea id="request_details" name="request_details"
+                            placeholder="DEFINE YOUR TARGET: e.g., 'Analyze top 5 AI CRM competitors targeting SMBs in North America - focus on GTM strategy, pricing, and recent feature launches.' OR 'Market size & 3yr forecast for quantum computing applications in drug discovery.'"
+                            required x-model="formData.request_details"></textarea>
+                    </div>
+                    <div class="form-group full-width">
+                        <button type="submit" id="submit-order-btn" class="cta-button" :disabled="formSubmitting">
+                            <span x-show="!formSubmitting">Proceed to Secure Payment</span>
+                            <span x-show="formSubmitting">Processing...</span>
+                        </button>
+                    </div>
+                    <div id="form-message" x-show="formMessage" :class="formMessageType" x-text="formMessage"></div>
+                    <div class="trust-badges full-width">
+                        <span class="trust-badge"><span class="icon">🔒</span> Secure Payment via Lemon Squeezy</span>
+                        <span class="trust-badge"><span class="icon">🤫</span> 100% Confidential Analysis</span>
+                        <span class="trust-badge"><span class="icon">⚡</span> Machine Speed Delivery</span>
+                    </div>
+                </form>
+            </div>
+        </section>
+
+    </main>
+
+    <footer>
+        <div class="container">
+            <p>© <span id="year"></span> Acumenis. AI-Driven Intelligence.</p>
+            <p><a href="#capabilities">Capabilities</a> | <a href="#pricing">Tiers</a> | Privacy (TBD) | Terms (TBD)</p>
+        </div>
+    </footer>
+
+    <script>
+        document.getElementById('year').textContent = new Date().getFullYear();
+
+        document.addEventListener('alpine:init', () => {
+            Alpine.data('orderForm', () => ({
+                formData: {
+                    client_name: '',
+                    client_email: '',
+                    company_name: '',
+                    report_type: '',
+                    request_details: ''
+                },
+                formMessage: '',
+                formMessageType: '',
+                formSubmitting: false,
+                init() {
+                    // Pre-select plan based on URL parameter or button click stored in parent scope
+                    const urlParams = new URLSearchParams(window.location.search);
+                    const planParam = urlParams.get('plan');
+                    if (planParam) {
+                        this.formData.report_type = planParam;
+                    } else if (this.currentPlan) { // Assumes currentPlan is set by pricing button clicks in parent scope
+                        this.formData.report_type = this.currentPlan;
+                    }
+                    // If linked directly via #order, currentPlan might be empty, user selects manually
+                },
+                displayMessage(message, type = 'info') {
+                    this.formMessage = message;
+                    this.formMessageType = type;
+                    // Auto-clear non-success messages
+                    if (type !== 'success') {
+                        setTimeout(() => {
+                            if (this.formMessage === message) { // Avoid clearing newer messages
+                                this.formMessage = '';
+                                this.formMessageType = '';
+                            }
+                        }, 7000);
+                    }
+                },
+                async submitOrder() {
+                    this.formMessage = '';
+                    this.formMessageType = '';
+                    if (!this.formData.report_type) {
+                        this.displayMessage('Please select an Intelligence Tier.', 'error');
+                        return;
+                    }
+                    if (!this.formData.request_details) {
+                        this.displayMessage('Please provide your Intelligence Objective.', 'error');
+                        return;
+                    }
+                    if (!this.formData.client_name || !this.formData.client_email) {
+                        this.displayMessage('Please provide your Name and Email.', 'error');
+                        return;
+                    }
+
+                    this.formSubmitting = true;
+                    this.displayMessage('Initiating secure checkout...', 'info');
+
+                    try {
+                        const response = await fetch('/api/v1/payments/create-checkout', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+                            body: JSON.stringify(this.formData)
+                        });
+
+                        if (response.status === 201) {
+                            const result = await response.json();
+                            if (result.checkout_url) {
+                                this.displayMessage('Redirecting to secure payment...', 'success');
+                                window.location.href = result.checkout_url;
+                                // Keep submitting true on success to prevent double clicks before redirect
+                                return; // Prevent re-enabling button
+                            } else { throw new Error('Checkout URL missing.'); }
+                        } else {
+                            const errorData = await response.json();
+                            throw new Error(errorData.detail || `HTTP error ${response.status}`);
+                        }
+                    } catch (error) {
+                        console.error('Checkout creation error:', error);
+                        this.displayMessage(`Error: ${error.message}. Please try again or contact support.`, 'error');
+                    } finally {
+                        // Only re-enable if not successful redirect
+                        if (this.formMessageType !== 'success') {
+                            this.formSubmitting = false;
+                        }
+                    }
+                }
+            }));
+        });
+
+        // Basic smooth scroll for internal links
+        document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+            anchor.addEventListener('click', function (e) {
+                const href = this.getAttribute('href');
+                if (href.startsWith('#') && href.length > 1) {
+                    e.preventDefault();
+                    const targetElement = document.querySelector(href);
+                    if (targetElement) {
+                        targetElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    }
+                }
+            });
+        });
+    </script>
+</body>
+
+</html>

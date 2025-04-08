@@ -39,7 +39,7 @@ RUN node --version && npm --version && psql --version
 FROM base AS python-deps
 
 # Copy only requirements to leverage Docker cache
-COPY ./autonomous_agency/requirements.txt .
+COPY ./Acumenis/requirements.txt . # UPDATED PATH
 # Install Python dependencies
 RUN pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir -r requirements.txt
@@ -64,16 +64,19 @@ WORKDIR /app
 FROM node-deps AS final
 
 # Copy the rest of the application code and config files from the root
-COPY ./autonomous_agency /app/autonomous_agency
+COPY ./Acumenis /app/Acumenis # UPDATED PATH
 COPY ./migrations /app/migrations # Copy the migrations directory itself (contains versions/)
 COPY ./alembic.ini /app/alembic.ini # Copy alembic config
 
 # Create directory for generated website AND templates
 RUN mkdir -p /app/static_website
-RUN mkdir -p /app/autonomous_agency/app/templates # Create templates dir inside app structure
+RUN mkdir -p /app/Acumenis/app/templates # Create templates dir inside app structure
 
 # Copy the UI template
-COPY ./autonomous_agency/app/templates/control_panel.html /app/autonomous_agency/app/templates/
+COPY ./Acumenis/app/templates/control_panel.html /app/Acumenis/app/templates/
+
+# Copy the pre-generated website files (if any, otherwise MCOL creates them)
+COPY ./Acumenis/app/static_website/ /app/static_website/
 
 # Copy the entrypoint script from the root
 COPY ./docker-entrypoint.sh /app/docker-entrypoint.sh
@@ -86,4 +89,4 @@ EXPOSE 8000
 ENTRYPOINT ["/app/docker-entrypoint.sh"]
 
 # Default command (passed to entrypoint script)
-CMD ["uvicorn", "autonomous_agency.app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "Acumenis.app.main:app", "--host", "0.0.0.0", "--port", "8000"] # UPDATED APP PATH

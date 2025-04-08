@@ -2,7 +2,7 @@
 
 Revision ID: 9a1b2c3d4e5f
 Revises: 
-Create Date: 2025-04-07 18:00:00.000000 
+Create Date: 2025-04-08 10:00:00.000000 
 
 """
 from typing import Sequence, Union
@@ -28,11 +28,11 @@ def upgrade() -> None:
     sa.Column('smtp_user', sa.String(length=255), nullable=False),
     sa.Column('smtp_password_encrypted', sa.Text(), nullable=False),
     sa.Column('provider', sa.String(length=100), nullable=True),
-    sa.Column('daily_limit', sa.Integer(), nullable=False),
-    sa.Column('emails_sent_today', sa.Integer(), nullable=False),
+    sa.Column('daily_limit', sa.Integer(), nullable=False, server_default='100'),
+    sa.Column('emails_sent_today', sa.Integer(), nullable=False, server_default='0'),
     sa.Column('last_used_at', sa.DateTime(timezone=True), nullable=True),
-    sa.Column('last_reset_date', sa.Date(), nullable=False),
-    sa.Column('is_active', sa.Boolean(), nullable=False),
+    sa.Column('last_reset_date', sa.Date(), nullable=False, server_default=sa.text('CURRENT_DATE')),
+    sa.Column('is_active', sa.Boolean(), nullable=False, server_default='true'),
     sa.Column('notes', sa.Text(), nullable=True),
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
     sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
@@ -47,7 +47,7 @@ def upgrade() -> None:
     sa.Column('contact_email', sa.String(length=255), nullable=True),
     sa.Column('potential_pain_point', sa.Text(), nullable=True),
     sa.Column('source', sa.String(length=100), nullable=True),
-    sa.Column('status', sa.String(length=50), nullable=False),
+    sa.Column('status', sa.String(length=50), nullable=False, server_default='NEW'),
     sa.Column('last_contacted_at', sa.DateTime(timezone=True), nullable=True),
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
     sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
@@ -65,12 +65,12 @@ def upgrade() -> None:
     sa.Column('company_name', sa.String(length=255), nullable=True),
     sa.Column('report_type', sa.String(length=50), nullable=False),
     sa.Column('request_details', sa.Text(), nullable=False),
-    sa.Column('status', sa.String(length=50), nullable=False),
+    sa.Column('status', sa.String(length=50), nullable=False, server_default='AWAITING_PAYMENT'),
     sa.Column('report_output_path', sa.String(length=1024), nullable=True),
     sa.Column('error_message', sa.Text(), nullable=True),
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
     sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
-    sa.Column('payment_status', sa.String(length=50), nullable=True),
+    sa.Column('payment_status', sa.String(length=50), server_default='unpaid', nullable=True),
     sa.Column('lemonsqueezy_order_id', sa.String(length=255), nullable=True),
     sa.Column('lemonsqueezy_checkout_id', sa.String(length=255), nullable=True),
     sa.Column('order_total_cents', sa.Integer(), nullable=True),

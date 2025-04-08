@@ -2,7 +2,7 @@
 
 Revision ID: a1b2c3d4e5f6
 Revises: 9a1b2c3d4e5f # Points to the previous migration's revision ID
-Create Date: 2025-04-07 18:01:00.000000 
+Create Date: 2025-04-07 20:01:00.000000 
 
 """
 from typing import Sequence, Union
@@ -34,8 +34,8 @@ def upgrade() -> None:
     sa.Column('active_email_accounts', sa.Integer(), nullable=True),
     sa.Column('deactivated_accounts_24h', sa.Integer(), nullable=True),
     sa.Column('bounce_rate_24h', sa.Float(), nullable=True),
-    sa.Column('revenue_24h', sa.Float(), nullable=True),
-    sa.Column('orders_created_24h', sa.Integer(), nullable=True),
+    sa.Column('revenue_24h', sa.Float(), server_default='0.0', nullable=True),
+    sa.Column('orders_created_24h', sa.Integer(), server_default='0', nullable=True),
     sa.PrimaryKeyConstraint('snapshot_id', name=op.f('pk_kpi_snapshots'))
     )
     op.create_index(op.f('ix_kpi_snapshots_snapshot_id'), 'kpi_snapshots', ['snapshot_id'], unique=False)
@@ -49,7 +49,7 @@ def upgrade() -> None:
     sa.Column('generated_strategy', sa.Text(), nullable=True),
     sa.Column('chosen_action', sa.Text(), nullable=True),
     sa.Column('action_parameters', postgresql.JSON(astext_type=sa.Text()), nullable=True),
-    sa.Column('action_status', sa.String(length=50), nullable=True),
+    sa.Column('action_status', sa.String(length=50), server_default='PENDING', nullable=True),
     sa.Column('action_result', sa.Text(), nullable=True),
     sa.Column('follow_up_kpi_snapshot_id', sa.Integer(), nullable=True),
     sa.ForeignKeyConstraint(['follow_up_kpi_snapshot_id'], ['kpi_snapshots.snapshot_id'], name=op.f('fk_mcol_decision_log_follow_up_kpi_snapshot_id_kpi_snapshots')),

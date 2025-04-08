@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Agency Control Panel</title>
+    <title>Acumenis Control Panel</title> <!-- Updated Title -->
     <style>
         body {
             font-family: sans-serif;
@@ -133,7 +133,7 @@
 
 <body>
     <div class="container">
-        <h1>🤖 Autonomous Agency Control Panel 🤖</h1>
+        <h1>🤖 Acumenis Control Panel 🤖</h1> <!-- Updated Title -->
 
         <div class="control-section">
             <h2>Core Agents</h2>
@@ -167,7 +167,7 @@
 
         async function controlWorker(workerName, action) {
             let url = '';
-            // Use the correct base path for control endpoints
+            // Use relative path for control endpoints
             const controlBasePath = '/control';
 
             if (action === 'start') {
@@ -202,14 +202,15 @@
             statusDiv.className = type; // 'info', 'success', 'error'
             statusDiv.style.display = 'block';
 
-            // Clear message after 7 seconds
-            setTimeout(() => {
-                if (statusDiv.textContent === message) { // Only clear if it's the same message
-                    statusDiv.style.display = 'none';
-                    statusDiv.textContent = '';
-                    statusDiv.className = '';
-                }
-            }, 7000);
+            if (type !== 'success') { // Keep success message until redirect
+                setTimeout(() => {
+                    if (statusDiv.textContent === message) { // Only clear if it's the same message
+                        statusDiv.style.display = 'none';
+                        statusDiv.textContent = '';
+                        statusDiv.className = '';
+                    }
+                }, 7000);
+            }
         }
     </script>
 </body>
