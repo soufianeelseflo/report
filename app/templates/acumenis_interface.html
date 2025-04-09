@@ -8,7 +8,7 @@
     <meta name="description"
         content="Acumenis: Real-time AI market analysis & competitor intelligence. Initiate deep research streams and receive actionable insights in hours.">
     <meta name="keywords"
-        content="Acumenis, AI research, market analysis, competitor intelligence, autonomous AI, business insights, strategic reporting, real-time data, AI engine">
+        content="Acumenis, AI research, market analysis, competitor intelligence, autonomous AI, business insights, strategic reporting, real-time data, AI engine, predictive intelligence">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link
@@ -18,7 +18,7 @@
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.13.10/dist/cdn.min.js"></script>
     <style>
         :root {
-            --bg-primary: #020617;
+            --bg-primary: #030712;
             /* Slate 950 */
             --bg-secondary: #0f172a;
             /* Slate 900 */
@@ -36,6 +36,8 @@
             /* Cyan 400 */
             --accent-blue: #60a5fa;
             /* Blue 400 */
+            --accent-magenta: #f472b6;
+            /* Pink 400 */
             --accent-emerald: #34d399;
             /* Emerald 400 */
             --accent-amber: #facc15;
@@ -65,9 +67,40 @@
             -webkit-font-smoothing: antialiased;
             -moz-osx-font-smoothing: grayscale;
             overflow-x: hidden;
-            background-image: radial-gradient(circle at 1px 1px, var(--border-color) 1px, transparent 0);
-            background-size: 25px 25px;
-            /* Subtle grid background */
+            background-image: radial-gradient(circle at 1px 1px, rgba(51, 65, 85, 0.5) 1px, transparent 0);
+            /* Dimmer grid */
+            background-size: 30px 30px;
+            /* Smaller grid */
+            position: relative;
+        }
+
+        /* Animated Gradient Background */
+        body::after {
+            content: '';
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: linear-gradient(315deg, rgba(3, 7, 18, 1) 0%, rgba(15, 23, 42, 1) 35%, rgba(30, 41, 59, 1) 100%);
+            background-size: 200% 200%;
+            animation: gradientBG 30s ease infinite;
+            z-index: -2;
+            /* Behind grid */
+        }
+
+        @keyframes gradientBG {
+            0% {
+                background-position: 0% 50%;
+            }
+
+            50% {
+                background-position: 100% 50%;
+            }
+
+            100% {
+                background-position: 0% 50%;
+            }
         }
 
         .container {
@@ -89,13 +122,13 @@
         }
 
         h1 {
-            font-size: 3.8rem;
+            font-size: 4rem;
             font-weight: 900;
-            letter-spacing: -0.025em;
+            letter-spacing: -0.03em;
         }
 
         h2 {
-            font-size: 2.5rem;
+            font-size: 2.8rem;
             text-align: center;
             margin-bottom: 1.5rem;
             font-weight: 700;
@@ -114,27 +147,17 @@
 
         a:hover {
             color: #67e8f9;
-            /* Lighter Cyan */
         }
 
         section {
-            padding: 100px 0;
+            padding: 120px 0;
             position: relative;
             overflow: hidden;
+            border-bottom: 1px solid var(--border-color);
         }
 
-        section::before {
-            /* Abstract background shapes */
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: radial-gradient(ellipse at 30% 20%, rgba(56, 189, 248, 0.1), transparent 70%),
-                radial-gradient(ellipse at 70% 80%, rgba(52, 211, 153, 0.08), transparent 70%);
-            z-index: 0;
-            opacity: 0.7;
+        section:last-of-type {
+            border-bottom: none;
         }
 
         .section-subtitle {
@@ -142,18 +165,18 @@
             font-size: 1.2rem;
             color: var(--text-muted);
             max-width: 800px;
-            margin: 0 auto 60px auto;
+            margin: 0 auto 70px auto;
         }
 
         /* --- Header --- */
         header {
-            background-color: rgba(2, 6, 23, 0.8);
-            backdrop-filter: blur(12px);
+            background-color: rgba(3, 7, 18, 0.7);
+            backdrop-filter: blur(15px);
             padding: 20px 0;
             border-bottom: 1px solid var(--border-color);
             position: sticky;
             top: 0;
-            z-index: 100;
+            z-index: 1000;
         }
 
         .header-content {
@@ -175,86 +198,87 @@
 
         .nav-links a {
             color: var(--text-secondary);
-            margin-left: 35px;
+            margin-left: 40px;
             font-weight: 600;
-            font-size: 0.95rem;
+            font-size: 1rem;
+            transition: color 0.3s ease, text-shadow 0.3s ease;
         }
 
         .nav-links a:hover {
             color: var(--white);
+            text-shadow: 0 0 8px var(--accent-cyan);
         }
 
         .header-cta {
-            background: linear-gradient(to right, var(--accent-cyan), var(--accent-blue));
+            background: linear-gradient(90deg, var(--accent-cyan) 0%, var(--accent-blue) 100%);
             color: var(--bg-primary);
-            padding: 12px 24px;
+            padding: 12px 25px;
             border-radius: 6px;
             font-weight: 700;
             transition: all 0.3s ease;
-            font-size: 0.95rem;
+            font-size: 1rem;
+            border: none;
+            cursor: pointer;
         }
 
         .header-cta:hover {
             text-decoration: none;
-            box-shadow: 0 0 20px rgba(34, 211, 238, 0.5);
-            transform: translateY(-2px);
+            box-shadow: 0 0 20px rgba(34, 211, 238, 0.6);
+            transform: scale(1.05);
         }
 
         /* --- Hero Section --- */
         .hero {
             text-align: center;
-            padding: 140px 0 160px 0;
-            border-bottom: 1px solid var(--border-color);
+            padding: 160px 0 180px 0;
+            min-height: 90vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-direction: column;
+            border-bottom: none;
         }
 
         .hero h1 {
             margin-bottom: 24px;
+            background: linear-gradient(90deg, var(--accent-cyan), var(--accent-magenta), var(--accent-blue));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            animation: text-glow 3s ease-in-out infinite alternate;
+        }
+
+        @keyframes text-glow {
+            from {
+                text-shadow: 0 0 8px var(--accent-cyan), 0 0 15px var(--accent-blue);
+            }
+
+            to {
+                text-shadow: 0 0 15px var(--accent-cyan), 0 0 30px var(--accent-blue);
+            }
         }
 
         .hero p.subtitle {
-            font-size: 1.4rem;
-            margin-bottom: 45px;
-            max-width: 850px;
+            font-size: 1.5rem;
+            margin-bottom: 50px;
+            max-width: 900px;
             margin-left: auto;
             margin-right: auto;
             color: var(--text-secondary);
         }
 
         .hero .cta-button {
-            padding: 22px 44px;
-            font-size: 1.25rem;
-            background: linear-gradient(to right, var(--accent-cyan), var(--accent-blue));
+            padding: 24px 48px;
+            font-size: 1.3rem;
+            background: linear-gradient(90deg, var(--accent-cyan) 0%, var(--accent-blue) 100%);
             color: var(--bg-primary);
             font-weight: 700;
         }
 
         .hero .cta-button:hover {
-            box-shadow: 0 0 25px rgba(56, 189, 248, 0.6);
+            box-shadow: 0 0 30px rgba(56, 189, 248, 0.7);
         }
 
-        .console-input-visual {
-            font-family: var(--font-mono);
-            background-color: var(--bg-secondary);
-            border: 1px solid var(--border-color);
-            border-radius: 6px;
-            padding: 15px 20px;
-            max-width: 700px;
-            margin: 40px auto 0 auto;
-            text-align: left;
-            color: var(--text-muted);
-            font-size: 0.95rem;
-        }
-
-        .console-input-visual::before {
-            content: '> ';
-            color: var(--accent-cyan);
-        }
-
-        .console-input-visual .placeholder-text {
-            opacity: 0.6;
-        }
-
-        /* --- Capabilities --- */
+        /* --- Capabilities (Neural Nodes) --- */
         #capabilities {
             background-color: var(--bg-secondary);
         }
@@ -262,17 +286,18 @@
         .capabilities-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-            gap: 35px;
+            gap: 40px;
         }
 
         .capability-item {
             background: var(--bg-tertiary);
-            padding: 35px;
-            border-radius: 10px;
+            padding: 40px;
+            border-radius: 12px;
             border: 1px solid var(--border-color);
-            transition: transform 0.3s ease, border-color 0.3s ease;
+            transition: transform 0.3s ease, box-shadow 0.3s ease, border-color 0.3s ease;
             position: relative;
             overflow: hidden;
+            cursor: default;
         }
 
         .capability-item::before {
@@ -282,11 +307,11 @@
             left: -50%;
             width: 200%;
             height: 200%;
-            background: radial-gradient(circle, rgba(34, 211, 238, 0.08), transparent 40%);
+            background: radial-gradient(circle, rgba(34, 211, 238, 0.1), transparent 50%);
             transition: opacity 0.5s ease;
             opacity: 0;
             z-index: 0;
-            animation: rotate 15s linear infinite;
+            animation: rotate 20s linear infinite;
         }
 
         .capability-item:hover::before {
@@ -298,21 +323,22 @@
             z-index: 1;
         }
 
-        /* Keep content above pseudo-element */
         .capability-item:hover {
-            transform: translateY(-6px);
+            transform: translateY(-10px) scale(1.03);
             border-color: var(--accent-cyan);
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4), 0 0 30px rgba(34, 211, 238, 0.4);
         }
 
         .capability-item .icon {
-            font-size: 2.8rem;
-            margin-bottom: 20px;
+            font-size: 3rem;
+            margin-bottom: 25px;
             color: var(--accent-cyan);
             display: block;
+            text-shadow: 0 0 10px var(--accent-cyan);
         }
 
         .capability-item h3 {
-            font-size: 1.4rem;
+            font-size: 1.5rem;
             margin-bottom: 15px;
             color: var(--text-primary);
         }
@@ -338,20 +364,33 @@
         .pricing-plan {
             border: 1px solid var(--border-color);
             border-radius: 12px;
-            padding: 40px;
+            padding: 45px;
             text-align: center;
             width: 100%;
-            max-width: 420px;
+            max-width: 450px;
             background: var(--bg-secondary);
             display: flex;
             flex-direction: column;
             justify-content: space-between;
             transition: transform 0.3s ease, box-shadow 0.3s ease;
+            position: relative;
+            overflow: hidden;
         }
 
-        .pricing-plan:hover {
-            transform: translateY(-8px);
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+        .pricing-plan::after {
+            content: '';
+            position: absolute;
+            inset: -1px;
+            border-radius: 13px;
+            background: linear-gradient(120deg, transparent, var(--accent-blue), transparent);
+            opacity: 0;
+            transition: opacity 0.4s ease;
+            z-index: -1;
+            filter: blur(10px);
+        }
+
+        .pricing-plan:hover::after {
+            opacity: 0.3;
         }
 
         .pricing-plan.premium {
@@ -359,8 +398,17 @@
             border-width: 2px;
         }
 
+        .pricing-plan.premium::after {
+            background: linear-gradient(120deg, transparent, var(--accent-emerald), transparent);
+        }
+
+        .pricing-plan:hover {
+            transform: translateY(-10px);
+            box-shadow: 0 12px 35px rgba(0, 0, 0, 0.4);
+        }
+
         .pricing-plan h3 {
-            font-size: 1.8rem;
+            font-size: 1.9rem;
             font-weight: 700;
             color: var(--text-primary);
             margin-bottom: 10px;
@@ -369,12 +417,12 @@
         .pricing-plan .plan-desc {
             font-size: 1rem;
             color: var(--text-muted);
-            margin-bottom: 25px;
-            min-height: 40px;
+            margin-bottom: 30px;
+            min-height: 45px;
         }
 
         .pricing-plan .price {
-            font-size: 3.8rem;
+            font-size: 4rem;
             font-weight: 800;
             color: var(--accent-emerald);
             margin-bottom: 5px;
@@ -382,7 +430,7 @@
         }
 
         .pricing-plan .price-term {
-            font-size: 0.9em;
+            font-size: 1rem;
             color: var(--text-muted);
             margin-bottom: 15px;
         }
@@ -390,8 +438,8 @@
         .pricing-plan .anchor-price {
             text-decoration: line-through;
             color: var(--text-muted);
-            font-size: 1em;
-            margin-bottom: 25px;
+            font-size: 1.1em;
+            margin-bottom: 30px;
             display: block;
             opacity: 0.7;
         }
@@ -399,7 +447,7 @@
         .pricing-plan ul {
             list-style: none;
             padding: 0;
-            margin: 30px 0;
+            margin: 35px 0;
             color: var(--text-secondary);
             text-align: left;
             flex-grow: 1;
@@ -407,7 +455,7 @@
         }
 
         .pricing-plan ul li {
-            margin-bottom: 15px;
+            margin-bottom: 18px;
             display: flex;
             align-items: flex-start;
         }
@@ -415,10 +463,12 @@
         .pricing-plan ul li::before {
             content: '✓';
             color: var(--accent-emerald);
-            margin-right: 12px;
+            margin-right: 15px;
             font-weight: bold;
             flex-shrink: 0;
             margin-top: 4px;
+            font-size: 1.1em;
+            text-shadow: 0 0 5px var(--accent-emerald);
         }
 
         .pricing-plan .cta-button {
@@ -427,11 +477,13 @@
             background: var(--accent-emerald);
             color: var(--bg-primary);
             font-weight: 700;
+            padding: 18px;
+            font-size: 1.1rem;
         }
 
         .pricing-plan .cta-button:hover {
             background: #059669;
-            box-shadow: 0 0 15px rgba(52, 211, 153, 0.4);
+            box-shadow: 0 0 20px rgba(52, 211, 153, 0.5);
         }
 
         .pricing-plan.standard .price {
@@ -445,16 +497,18 @@
 
         .pricing-plan.standard .cta-button:hover {
             background: #2563eb;
-            box-shadow: 0 0 15px rgba(56, 189, 248, 0.4);
+            box-shadow: 0 0 20px rgba(56, 189, 248, 0.5);
         }
 
         .pricing-plan.standard ul li::before {
             color: var(--accent-blue);
+            text-shadow: 0 0 5px var(--accent-blue);
         }
 
         /* --- Order Form --- */
         #order {
             background: linear-gradient(var(--bg-secondary), var(--bg-tertiary));
+            padding-bottom: 120px;
         }
 
         #report-order-form {
@@ -464,24 +518,28 @@
             padding: 50px 60px;
             border-radius: 12px;
             border: 1px solid var(--border-color);
-            box-shadow: 0 15px 35px rgba(0, 0, 0, 0.2);
+            box-shadow: 0 15px 40px rgba(0, 0, 0, 0.3);
         }
 
         .form-group label {
             color: var(--text-secondary);
             font-weight: 500;
+            font-size: 1rem;
         }
 
         .form-group input[type="text"],
         .form-group input[type="email"],
         .form-group select,
         .form-group textarea {
-            background-color: var(--bg-tertiary);
-            border-color: var(--border-color);
+            background-color: var(--bg-primary);
+            border: 1px solid var(--border-color);
             color: var(--text-primary);
             padding: 16px;
             font-size: 1rem;
             border-radius: 8px;
+            margin-top: 8px;
+            transition: border-color 0.3s ease, box-shadow 0.3s ease;
+            width: 100%;
         }
 
         .form-group input:focus,
@@ -489,14 +547,15 @@
         .form-group textarea:focus {
             border-color: var(--accent-cyan);
             outline: none;
-            box-shadow: 0 0 0 3px rgba(34, 211, 238, 0.3);
-            background-color: var(--bg-medium);
+            box-shadow: 0 0 0 3px rgba(34, 211, 238, 0.4);
+            background-color: var(--bg-secondary);
         }
 
         .form-group textarea {
             min-height: 180px;
             resize: vertical;
-            font-family: inherit;
+            font-family: var(--font-mono);
+            line-height: 1.6;
         }
 
         #submit-order-btn {
@@ -510,6 +569,7 @@
             border-radius: 8px;
             transition: all 0.3s ease;
             width: 100%;
+            margin-top: 15px;
         }
 
         #submit-order-btn:hover {
@@ -581,41 +641,26 @@
         footer {
             background-color: var(--bg-secondary);
             border-top: 1px solid var(--border-color);
+            padding: 50px 0;
+        }
+
+        footer .container {
+            text-align: center;
         }
 
         footer a {
             color: var(--text-secondary);
+            margin: 0 10px;
         }
 
         footer a:hover {
             color: var(--white);
         }
 
-        /* --- Animations --- */
-        @keyframes rotate {
-            from {
-                transform: rotate(0deg);
-            }
-
-            to {
-                transform: rotate(360deg);
-            }
-        }
-
-        @keyframes pulse {
-
-            0%,
-            100% {
-                opacity: 1;
-            }
-
-            50% {
-                opacity: .5;
-            }
-        }
-
-        .pulse {
-            animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        footer p {
+            margin: 10px 0 0 0;
+            font-size: 0.9rem;
+            color: var(--text-muted);
         }
 
         /* --- Responsive --- */
@@ -709,66 +754,71 @@
                 align-items: center;
             }
         }
+
+        /* AlpineJS helper */
+        [x-cloak] {
+            display: none !important;
+        }
     </style>
 </head>
 
-<body x-data="{ currentPlan: '', formMessage: '', formMessageType: '', formSubmitting: false }">
+<body x-data="pageData()" x-init="init()">
 
-    <header>
+    <header x-data="{ scrolled: false }" @scroll.window="scrolled = (window.scrollY > 10)"
+        :class="{ 'shadow-lg': scrolled }">
         <div class="container header-content">
-            <a href="#hero" class="logo">Acumenis<span class="highlight">.</span></a>
+            <a href="#hero" @click.prevent="scrollToSection('hero')" class="logo">Acumenis<span
+                    class="highlight">.</span></a>
             <nav class="nav-links">
-                <a href="#capabilities">Capabilities</a>
-                <a href="#pricing">Tiers</a>
-                <a href="#order">Initiate</a>
+                <a href="#capabilities" @click.prevent="scrollToSection('capabilities')">Capabilities</a>
+                <a href="#pricing" @click.prevent="scrollToSection('pricing')">Tiers</a>
+                <a href="#order" @click.prevent="scrollToSection('order')">Initiate</a>
             </nav>
-            <a href="#order" class="cta-button header-cta">Initiate Analysis</a>
+            <button @click="scrollToSection('order'); currentPlan = ''" class="cta-button header-cta">Initiate
+                Analysis</button>
         </div>
     </header>
 
     <main>
         <section class="hero" id="hero">
             <div class="container">
-                <h1>Acumenis: AI Insight Engine</h1>
-                <p class="subtitle">Intelligence Delivered at <span class="highlight">Machine Speed</span>. Gain
-                    unparalleled market clarity and competitor insights in hours, not weeks.</p>
-                <a href="#order" @click="currentPlan = ''" class="cta-button">Initiate Your First Analysis</a>
-                <div class="console-input-visual">
-                    <span class="placeholder-text">analyze competitors(market="SaaS Accounting UK",
-                        focus="pricing_strategy")...</span>
-                </div>
+                <h1>Acumenis // Neural Insight Nexus</h1>
+                <p class="subtitle">Intelligence Delivered at <span class="highlight">Machine Speed</span>. Access deep
+                    market & competitor analysis synthesized by our advanced AI core in hours.</p>
+                <button @click="scrollToSection('order'); currentPlan = ''" class="cta-button"> [ Initiate Connection ]
+                </button>
             </div>
         </section>
 
         <section id="capabilities">
             <div class="container">
-                <h2>Intelligence Streams</h2>
-                <p class="section-subtitle">Access diverse, AI-synthesized data streams tailored to your strategic
-                    imperatives.</p>
+                <h2>Intelligence Streams // Activate Your Edge</h2>
+                <p class="section-subtitle">Select your required intelligence stream. Our AI core processes multi-vector
+                    data for unparalleled clarity.</p>
                 <div class="capabilities-grid">
                     <div class="capability-item">
                         <span class="icon">📈</span>
-                        <h3>Market Trajectory Analysis</h3>
-                        <p>Map market size, growth vectors, TAM/SAM/SOM, and identify emergent opportunities with
-                            predictive modeling.</p>
+                        <h3>Market Vector Scan</h3>
+                        <p>Real-time market sizing, growth trajectory mapping, TAM/SAM/SOM, and emergent opportunity
+                            identification.</p>
                     </div>
                     <div class="capability-item">
                         <span class="icon">🎯</span>
-                        <h3>Competitor Vector Scan</h3>
-                        <p>Deconstruct competitor strategies, product roadmaps, market positioning, and potential
-                            vulnerabilities.</p>
+                        <h3>Competitor Threat Matrix</h3>
+                        <p>Deconstruct competitor strategies, product pipelines, GTM effectiveness, and predictive
+                            vulnerability analysis.</p>
                     </div>
                     <div class="capability-item">
                         <span class="icon">💡</span>
-                        <h3>Predictive Trend Synthesis</h3>
-                        <p>Detect weak signals and forecast disruptive shifts using AI pattern analysis across diverse
-                            datasets.</p>
+                        <h3>Predictive Trajectory Synthesis</h3>
+                        <p>Detect weak signals, model future scenarios, and forecast disruptive shifts with AI-driven
+                            foresight.</p>
                     </div>
                     <div class="capability-item">
                         <span class="icon">⚙️</span>
-                        <h3>Custom Intelligence Synthesis</h3>
-                        <p>Define your specific parameters; our AI core generates bespoke reports answering your most
-                            critical questions.</p>
+                        <h3>Custom Query Protocol</h3>
+                        <p>Define bespoke intelligence parameters. Receive synthesized answers to your most critical
+                            strategic questions.</p>
                     </div>
                 </div>
             </div>
@@ -776,16 +826,16 @@
 
         <section id="pricing">
             <div class="container">
-                <h2>Select Your Intelligence Tier</h2>
-                <p class="section-subtitle">Choose the analysis depth and speed required. Both tiers leverage our core
-                    AI engine for maximum impact.</p>
+                <h2>Access Protocols // Intelligence Tiers</h2>
+                <p class="section-subtitle">Select the protocol that aligns with your required depth of analysis and
+                    strategic urgency.</p>
                 <div class="pricing-table">
                     <div class="pricing-plan standard">
-                        <h3>Standard Synthesis</h3>
-                        <p class="plan-desc">Rapid, focused intelligence for tactical decisions and market awareness.
+                        <h3>Standard Stream</h3>
+                        <p class="plan-desc">Focused intelligence feed for tactical awareness and rapid market checks.
                         </p>
                         <div class="price">$499</div>
-                        <div class="price-term">One-Time Analysis</div>
+                        <div class="price-term">Per Analysis Request</div>
                         <div class="anchor-price"><s>$1497 Industry Value</s></div>
                         <ul>
                             <li>Core Market Landscape Scan</li>
@@ -796,87 +846,83 @@
                             <li>Turnaround: ~12 Business Hours</li>
                             <li>Format: PDF Synthesis Report</li>
                         </ul>
-                        <button
-                            @click="currentPlan = 'standard_499'; document.getElementById('order').scrollIntoView({ behavior: 'smooth' });"
-                            class="cta-button">Initiate Standard</button>
+                        <button @click="selectPlan('standard_499')" class="cta-button">[ Select Standard Stream
+                            ]</button>
                     </div>
 
                     <div class="pricing-plan premium">
-                        <!-- <div class="premium-badge">Premium</div> -->
-                        <h3>Premium Singularity</h3>
-                        <p class="plan-desc">Maximum depth analysis with strategic foresight for critical initiatives.
-                        </p>
+                        <h3>Nexus Deep Dive</h3>
+                        <p class="plan-desc">Maximum depth synthesis with strategic foresight for high-stakes
+                            initiatives.</p>
                         <div class="price">$999</div>
-                        <div class="price-term">One-Time Analysis</div>
+                        <div class="price-term">Per Analysis Request</div>
                         <div class="anchor-price"><s>$2997 Industry Value</s></div>
                         <ul>
-                            <li>Deep Market Segmentation & Sizing</li>
+                            <li>Deep Market Vector Analysis</li>
                             <li>Extensive Competitor Deconstruction (5-10+)</li>
-                            <li>Predictive Trend Modeling & Scenarios</li>
-                            <li>Maximum AI Synthesis Depth & Nuance</li>
+                            <li>Predictive Trajectory Modeling</li>
+                            <li>Maximum AI Synthesis Depth</li>
                             <li>Actionable Strategic Recommendations</li>
-                            <li>SWOT / PESTLE Framework Integration</li>
+                            <li>Framework Integration (SWOT/PESTLE)</li>
                             <li>Raw Data Export Option</li>
                             <li>Priority Turnaround: < 6 Business Hours</li>
-                            <li>Format: PDF Report + Data Files + Exec Brief</li>
+                            <li>Format: PDF Report + Data + Exec Brief</li>
                         </ul>
-                        <button
-                            @click="currentPlan = 'premium_999'; document.getElementById('order').scrollIntoView({ behavior: 'smooth' });"
-                            class="cta-button">Initiate Premium</button>
+                        <button @click="selectPlan('premium_999')" class="cta-button">[ Initiate Nexus Deep Dive
+                            ]</button>
                     </div>
                 </div>
             </div>
         </section>
 
-        <section id="order">
+        <section id="order" x-ref="orderSection">
             <div class="container">
-                <h2>Initiate Analysis Stream</h2>
-                <p class="section-subtitle">Define your intelligence parameters. Our AI begins synthesis immediately
-                    upon secure payment confirmation via Lemon Squeezy.</p>
+                <h2>Initiation Protocol // Secure Analysis Request</h2>
+                <p class="section-subtitle">Define parameters for the AI Core. Processing commences immediately upon
+                    secure transaction confirmation via Lemon Squeezy.</p>
 
-                <form id="report-order-form" @submit.prevent="submitOrder">
-                    <div class="form-grid">
-                        <div class="form-group">
-                            <label for="name">Contact Name *</label>
-                            <input type="text" id="name" name="name" required x-model="formData.client_name">
-                        </div>
-                        <div class="form-group">
-                            <label for="email">Business Email *</label>
-                            <input type="email" id="email" name="email" required placeholder="Report delivered here"
-                                x-model="formData.client_email">
-                        </div>
+                <form id="report-order-form" @submit.prevent="submitOrder" x-ref="orderForm" novalidate>
+                    <input type="hidden" name="report_type" :value="currentPlan"> <!-- Set by Alpine -->
+
+                    <div class="form-group">
+                        <label for="name">Contact Name *</label>
+                        <input type="text" id="name" name="name" required x-model="formData.client_name">
                     </div>
-                    <div class="form-group full-width">
+                    <div class="form-group">
+                        <label for="email">Business Email *</label>
+                        <input type="email" id="email" name="email" required placeholder="Intelligence delivered here"
+                            x-model="formData.client_email">
+                    </div>
+                    <div class="form-group">
                         <label for="company_name">Company Name (Optional)</label>
-                        <input type="text" id="company_name" name="company_name" placeholder="For report context"
+                        <input type="text" id="company_name" name="company_name" placeholder="For analysis context"
                             x-model="formData.company_name">
                     </div>
-                    <div class="form-group full-width">
-                        <label for="report_type">Select Intelligence Tier *</label>
-                        <select id="report_type" name="report_type" required x-model="formData.report_type"
-                            x-init="if (currentPlan) formData.report_type = currentPlan">
-                            <option value="" disabled>-- Choose Report Depth --</option>
-                            <option value="standard_499">Standard Synthesis ($499)</option>
-                            <option value="premium_999">Premium Singularity ($999)</option>
-                        </select>
+                    <div class="form-group"> <!-- Display selected plan -->
+                        <label>Selected Tier:</label>
+                        <input type="text" id="report_type_display" :value="getPlanName(currentPlan)" readonly disabled
+                            style="background-color: var(--bg-tertiary); border-color: var(--border-color); cursor: not-allowed; color: var(--text-primary);">
+                        <p x-show="!currentPlan" style="color: var(--accent-amber); font-size: 0.9em; margin-top: 5px;">
+                            Please select a tier from the section above.</p>
                     </div>
-                    <div class="form-group full-width">
+                    <div class="form-group">
                         <label for="request_details">Intelligence Objective & Parameters *</label>
                         <textarea id="request_details" name="request_details"
                             placeholder="DEFINE YOUR TARGET: e.g., 'Analyze top 5 AI CRM competitors targeting SMBs in North America - focus on GTM strategy, pricing, and recent feature launches.' OR 'Market size & 3yr forecast for quantum computing applications in drug discovery.'"
                             required x-model="formData.request_details"></textarea>
                     </div>
-                    <div class="form-group full-width">
-                        <button type="submit" id="submit-order-btn" class="cta-button" :disabled="formSubmitting">
-                            <span x-show="!formSubmitting">Proceed to Secure Payment</span>
-                            <span x-show="formSubmitting">Processing...</span>
+                    <div class="form-group">
+                        <button type="submit" id="submit-order-btn" class="cta-button"
+                            :disabled="formSubmitting || !currentPlan">
+                            <span x-show="!formSubmitting">[ Initiate Analysis & Proceed to Payment ]</span>
+                            <span x-show="formSubmitting">Connecting to Secure Payment...</span>
                         </button>
                     </div>
                     <div id="form-message" x-show="formMessage" :class="formMessageType" x-text="formMessage"></div>
-                    <div class="trust-badges full-width">
+                    <div class="trust-badges">
                         <span class="trust-badge"><span class="icon">🔒</span> Secure Payment via Lemon Squeezy</span>
-                        <span class="trust-badge"><span class="icon">🤫</span> 100% Confidential Analysis</span>
-                        <span class="trust-badge"><span class="icon">⚡</span> Machine Speed Delivery</span>
+                        <span class="trust-badge"><span class="icon">🤫</span> End-to-End Encrypted Request</span>
+                        <span class="trust-badge"><span class="icon">⚡</span> Machine Speed Processing</span>
                     </div>
                 </form>
             </div>
@@ -886,114 +932,78 @@
 
     <footer>
         <div class="container">
-            <p>© <span id="year"></span> Acumenis. AI-Driven Intelligence.</p>
-            <p><a href="#capabilities">Capabilities</a> | <a href="#pricing">Tiers</a> | Privacy (TBD) | Terms (TBD)</p>
+            <p>© <span x-text="new Date().getFullYear()"></span> Acumenis // AI Insight Engine.</p>
+            <p><a href="#capabilities" @click.prevent="scrollToSection('capabilities')">Capabilities</a> | <a
+                    href="#pricing" @click.prevent="scrollToSection('pricing')">Tiers</a> | Privacy (TBD) | Terms (TBD)
+            </p>
         </div>
     </footer>
 
     <script>
-        document.getElementById('year').textContent = new Date().getFullYear();
-
-        document.addEventListener('alpine:init', () => {
-            Alpine.data('orderForm', () => ({
+        function pageData() {
+            return {
+                currentPlan: '', // Holds 'standard_499' or 'premium_999'
                 formData: {
-                    client_name: '',
-                    client_email: '',
-                    company_name: '',
-                    report_type: '',
-                    request_details: ''
+                    client_name: '', client_email: '', company_name: '',
+                    report_type: '', request_details: ''
                 },
-                formMessage: '',
-                formMessageType: '',
-                formSubmitting: false,
+                formMessage: '', formMessageType: '', formSubmitting: false,
+
                 init() {
-                    // Pre-select plan based on URL parameter or button click stored in parent scope
                     const urlParams = new URLSearchParams(window.location.search);
                     const planParam = urlParams.get('plan');
-                    if (planParam) {
+                    if (planParam === 'standard_499' || planParam === 'premium_999') {
+                        this.currentPlan = planParam;
                         this.formData.report_type = planParam;
-                    } else if (this.currentPlan) { // Assumes currentPlan is set by pricing button clicks in parent scope
-                        this.formData.report_type = this.currentPlan;
                     }
-                    // If linked directly via #order, currentPlan might be empty, user selects manually
+                    if (window.location.hash) { this.scrollToSection(window.location.hash.substring(1)); }
+                },
+                selectPlan(planValue) {
+                    this.currentPlan = planValue;
+                    this.formData.report_type = planValue;
+                    this.scrollToSection('order');
+                },
+                getPlanName(planValue) {
+                    if (planValue === 'standard_499') return 'Standard Stream ($499)';
+                    if (planValue === 'premium_999') return 'Nexus Deep Dive ($999)';
+                    return 'No Tier Selected';
+                },
+                scrollToSection(sectionId) {
+                    const targetElement = document.getElementById(sectionId);
+                    if (targetElement) { targetElement.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
                 },
                 displayMessage(message, type = 'info') {
-                    this.formMessage = message;
-                    this.formMessageType = type;
-                    // Auto-clear non-success messages
+                    this.formMessage = message; this.formMessageType = type;
                     if (type !== 'success') {
-                        setTimeout(() => {
-                            if (this.formMessage === message) { // Avoid clearing newer messages
-                                this.formMessage = '';
-                                this.formMessageType = '';
-                            }
-                        }, 7000);
+                        setTimeout(() => { if (this.formMessage === message) { this.formMessage = ''; this.formMessageType = ''; } }, 7000);
                     }
                 },
                 async submitOrder() {
-                    this.formMessage = '';
-                    this.formMessageType = '';
-                    if (!this.formData.report_type) {
-                        this.displayMessage('Please select an Intelligence Tier.', 'error');
-                        return;
-                    }
-                    if (!this.formData.request_details) {
-                        this.displayMessage('Please provide your Intelligence Objective.', 'error');
-                        return;
-                    }
-                    if (!this.formData.client_name || !this.formData.client_email) {
-                        this.displayMessage('Please provide your Name and Email.', 'error');
-                        return;
-                    }
+                    this.formMessage = ''; this.formMessageType = '';
+                    if (!this.currentPlan) { this.displayMessage('Please select an Intelligence Tier first.', 'error'); return; }
+                    if (!this.$refs.orderForm.checkValidity()) { this.displayMessage('Please complete all required fields.', 'error'); this.$refs.orderForm.reportValidity(); return; }
 
-                    this.formSubmitting = true;
-                    this.displayMessage('Initiating secure checkout...', 'info');
-
+                    this.formSubmitting = true; this.displayMessage('Initiating secure checkout...', 'info');
                     try {
                         const response = await fetch('/api/v1/payments/create-checkout', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
                             body: JSON.stringify(this.formData)
                         });
-
                         if (response.status === 201) {
                             const result = await response.json();
                             if (result.checkout_url) {
-                                this.displayMessage('Redirecting to secure payment...', 'success');
-                                window.location.href = result.checkout_url;
-                                // Keep submitting true on success to prevent double clicks before redirect
-                                return; // Prevent re-enabling button
+                                this.displayMessage('Redirecting to secure payment processor...', 'success');
+                                window.location.href = result.checkout_url; return;
                             } else { throw new Error('Checkout URL missing.'); }
-                        } else {
-                            const errorData = await response.json();
-                            throw new Error(errorData.detail || `HTTP error ${response.status}`);
-                        }
+                        } else { const errorData = await response.json(); throw new Error(errorData.detail || `HTTP error ${response.status}`); }
                     } catch (error) {
                         console.error('Checkout creation error:', error);
-                        this.displayMessage(`Error: ${error.message}. Please try again or contact support.`, 'error');
-                    } finally {
-                        // Only re-enable if not successful redirect
-                        if (this.formMessageType !== 'success') {
-                            this.formSubmitting = false;
-                        }
-                    }
+                        this.displayMessage(`Error: ${error.message}. Please verify details or contact support.`, 'error');
+                    } finally { if (this.formMessageType !== 'success') { this.formSubmitting = false; } }
                 }
-            }));
-        });
-
-        // Basic smooth scroll for internal links
-        document.querySelectorAll('a[href^="#"]').forEach(anchor => {
-            anchor.addEventListener('click', function (e) {
-                const href = this.getAttribute('href');
-                if (href.startsWith('#') && href.length > 1) {
-                    e.preventDefault();
-                    const targetElement = document.querySelector(href);
-                    if (targetElement) {
-                        targetElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                    }
-                }
-            });
-        });
+            }
+        }
     </script>
 </body>
 

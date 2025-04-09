@@ -1,630 +1,929 @@
-<!DOCTYPE html>
-<html lang="en">
+<price>
+    <!DOCTYPE html>
+    <html lang="en">
 
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Acumenis Pricing - AI Intelligence Tiers</title>
-    <meta name="description"
-        content="Compare Acumenis AI report plans. Choose Standard ($499) for core insights or Premium ($999) for deep strategic analysis and recommendations.">
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link
-        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Roboto+Mono:wght@400;700&display=swap"
-        rel="stylesheet">
-    <!-- Alpine.js via CDN -->
-    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
-    <style>
-        /* --- Global Styles & Variables (Same as index.html) --- */
-        :root {
-            --primary-color: #3b82f6;
-            --secondary-color: #111827;
-            --accent-color: #10b981;
-            --light-bg: #f9fafb;
-            --dark-bg: #1f2937;
-            --medium-grey: #9ca3af;
-            --dark-grey: #4b5563;
-            --text-color-light: #d1d5db;
-            --text-color-dark: #374151;
-            --white: #ffffff;
-            --border-color: #e5e7eb;
-            --success-bg: #dcfce7;
-            --success-border: #86efac;
-            --success-text: #166534;
-            --error-bg: #fee2e2;
-            --error-border: #fca5a5;
-            --error-text: #991b1b;
-            --info-bg: #e0f2fe;
-            --info-border: #7dd3fc;
-            --info-text: #075985;
-        }
-
-        *,
-        *::before,
-        *::after {
-            box-sizing: border-box;
-        }
-
-        html {
-            scroll-behavior: smooth;
-        }
-
-        body {
-            font-family: 'Inter', sans-serif;
-            line-height: 1.7;
-            margin: 0;
-            padding: 0;
-            background-color: var(--light-bg);
-            color: var(--text-color-dark);
-            font-size: 16px;
-            -webkit-font-smoothing: antialiased;
-            -moz-osx-font-smoothing: grayscale;
-        }
-
-        .container {
-            max-width: 1280px;
-            margin: 0 auto;
-            padding: 0 24px;
-        }
-
-        h1,
-        h2,
-        h3,
-        h4 {
-            margin-top: 0;
-            line-height: 1.3;
-            color: var(--secondary-color);
-            font-weight: 700;
-        }
-
-        h1 {
-            font-size: 3rem;
-            font-weight: 800;
-            text-align: center;
-            margin-bottom: 1rem;
-        }
-
-        h2 {
-            font-size: 2.5rem;
-            text-align: center;
-            margin-bottom: 1rem;
-        }
-
-        p {
-            margin-top: 0;
-            margin-bottom: 1.25rem;
-        }
-
-        a {
-            color: var(--primary-color);
-            text-decoration: none;
-            transition: color 0.3s ease;
-        }
-
-        a:hover {
-            text-decoration: underline;
-            color: #1d4ed8;
-        }
-
-        section {
-            padding: 80px 0;
-        }
-
-        .section-subtitle {
-            text-align: center;
-            font-size: 1.15em;
-            color: var(--dark-grey);
-            max-width: 750px;
-            margin: 0 auto 60px auto;
-        }
-
-        .cta-button {
-            background-color: var(--primary-color);
-            color: var(--white);
-            padding: 14px 28px;
-            font-size: 1.05em;
-            font-weight: 600;
-            text-decoration: none;
-            border-radius: 8px;
-            transition: background-color 0.3s ease, transform 0.1s ease;
-            display: inline-block;
-            border: none;
-            cursor: pointer;
-            box-shadow: 0 4px 6px rgba(50, 50, 93, 0.11), 0 1px 3px rgba(0, 0, 0, 0.08);
-        }
-
-        .cta-button:hover {
-            background-color: #1d4ed8;
-            transform: translateY(-2px);
-        }
-
-        .cta-button:active {
-            transform: translateY(0);
-        }
-
-        header {
-            background-color: rgba(255, 255, 255, 0.9);
-            backdrop-filter: blur(10px);
-            padding: 16px 0;
-            border-bottom: 1px solid var(--border-color);
-            position: sticky;
-            top: 0;
-            z-index: 100;
-        }
-
-        .header-content {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-
-        .logo {
-            font-size: 1.75rem;
-            font-weight: 800;
-            color: var(--secondary-color);
-        }
-
-        .nav-links a {
-            color: var(--text-color-dark);
-            margin-left: 30px;
-            font-weight: 600;
-        }
-
-        .nav-links a:hover {
-            color: var(--primary-color);
-        }
-
-        .header-cta {
-            background-color: var(--primary-color);
-            color: var(--white);
-            padding: 10px 20px;
-            border-radius: 6px;
-            font-weight: 600;
-        }
-
-        .header-cta:hover {
-            background-color: #1d4ed8;
-            text-decoration: none;
-        }
-
-        footer {
-            background-color: var(--secondary-color);
-            color: #9ca3af;
-            text-align: center;
-            padding: 40px 0;
-            margin-top: 60px;
-            font-size: 0.9em;
-            border-top: 1px solid var(--border-color);
-        }
-
-        footer p {
-            margin: 5px 0;
-        }
-
-        footer a {
-            color: var(--text-secondary);
-        }
-
-        footer a:hover {
-            color: var(--white);
-        }
-
-        /* --- Pricing Page Specific --- */
-        #pricing-details {
-            background-color: var(--white);
-        }
-
-        .pricing-table {
-            display: flex;
-            justify-content: center;
-            gap: 30px;
-            flex-wrap: wrap;
-            align-items: stretch;
-            margin-bottom: 60px;
-        }
-
-        .pricing-plan {
-            border: 1px solid var(--medium-grey);
-            border-radius: 12px;
-            padding: 40px;
-            text-align: center;
-            width: 100%;
-            max-width: 450px;
-            background: var(--white);
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
-            display: flex;
-            flex-direction: column;
-            justify-content: space-between;
-            transition: transform 0.3s ease, box-shadow 0.3s ease;
-        }
-
-        .pricing-plan:hover {
-            transform: translateY(-8px);
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
-        }
-
-        .pricing-plan.premium {
-            border-color: var(--accent-emerald);
-            border-width: 2px;
-            position: relative;
-            overflow: hidden;
-        }
-
-        .premium-badge {
-            position: absolute;
-            top: 18px;
-            right: -45px;
-            background-color: var(--accent-emerald);
-            color: var(--secondary-color);
-            padding: 6px 45px;
-            font-size: 0.8em;
-            font-weight: 700;
-            transform: rotate(45deg);
-            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
-            letter-spacing: 0.5px;
-        }
-
-        .pricing-plan h3 {
-            font-size: 1.7rem;
-            font-weight: 700;
-            color: var(--secondary-color);
-            margin-bottom: 10px;
-        }
-
-        .pricing-plan .plan-desc {
-            font-size: 1rem;
-            color: var(--dark-grey);
-            margin-bottom: 25px;
-            min-height: 40px;
-        }
-
-        .pricing-plan .price {
-            font-size: 3.5rem;
-            font-weight: 800;
-            color: var(--primary-color);
-            margin-bottom: 5px;
-        }
-
-        .pricing-plan .price-term {
-            font-size: 0.9em;
-            color: var(--dark-grey);
-            margin-bottom: 15px;
-        }
-
-        .pricing-plan .anchor-price {
-            text-decoration: line-through;
-            color: var(--dark-grey);
-            font-size: 1em;
-            margin-bottom: 25px;
-            display: block;
-            opacity: 0.7;
-        }
-
-        .pricing-plan ul {
-            list-style: none;
-            padding: 0;
-            margin: 30px 0;
-            color: var(--text-color-dark);
-            text-align: left;
-            flex-grow: 1;
-            font-size: 1rem;
-        }
-
-        .pricing-plan ul li {
-            margin-bottom: 15px;
-            display: flex;
-            align-items: flex-start;
-        }
-
-        .pricing-plan ul li::before {
-            content: '✓';
-            color: var(--accent-emerald);
-            margin-right: 12px;
-            font-weight: bold;
-            flex-shrink: 0;
-            margin-top: 4px;
-        }
-
-        .pricing-plan .cta-button {
-            margin-top: auto;
-            width: 100%;
-            background: var(--accent-emerald);
-            color: var(--secondary-color);
-        }
-
-        .pricing-plan .cta-button:hover {
-            background: #059669;
-            box-shadow: 0 0 15px rgba(52, 211, 153, 0.4);
-        }
-
-        .pricing-plan.standard .price {
-            color: var(--primary-color);
-        }
-
-        .pricing-plan.standard .cta-button {
-            background: var(--primary-color);
-            color: var(--white);
-        }
-
-        .pricing-plan.standard .cta-button:hover {
-            background: #1d4ed8;
-            box-shadow: 0 0 15px rgba(56, 189, 248, 0.4);
-        }
-
-        .pricing-plan.standard ul li::before {
-            color: var(--primary-color);
-        }
-
-        #faq {
-            background-color: var(--light-bg);
-            border-top: 1px solid var(--border-color);
-        }
-
-        .faq-container {
-            max-width: 900px;
-            margin: 0 auto;
-        }
-
-        .faq-item {
-            border-bottom: 1px solid var(--border-color);
-            padding: 25px 0;
-        }
-
-        .faq-item:last-child {
-            border-bottom: none;
-        }
-
-        .faq-question {
-            font-weight: 600;
-            color: var(--secondary-color);
-            font-size: 1.15em;
-            cursor: pointer;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-
-        .faq-question span {
-            transition: color 0.3s ease;
-        }
-
-        .faq-question:hover span {
-            color: var(--primary-color);
-        }
-
-        .faq-question::after {
-            content: '+';
-            font-size: 1.8em;
-            color: var(--primary-color);
-            transition: transform 0.3s ease;
-            line-height: 1;
-        }
-
-        .faq-answer {
-            max-height: 0;
-            overflow: hidden;
-            transition: max-height 0.4s ease-out, padding-top 0.4s ease-out;
-            color: var(--dark-grey);
-            padding-top: 0;
-        }
-
-        .faq-item.active .faq-answer {
-            max-height: 300px;
-            padding-top: 20px;
-        }
-
-        .faq-item.active .faq-question::after {
-            transform: rotate(45deg);
-        }
-
-        @media (max-width: 992px) {
-            .pricing-table {
-                gap: 25px;
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Acumenis Pricing - AI Intelligence Tiers</title>
+        <meta name="description"
+            content="Compare Acumenis AI report plans. Choose Standard ($499) for core insights or Premium ($999) for deep strategic analysis and recommendations.">
+        <link rel="preconnect" href="https://fonts.googleapis.com">
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link
+            href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;900&family=Roboto+Mono:wght@400;700&display=swap"
+            rel="stylesheet">
+        <!-- Alpine.js via CDN -->
+        <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.13.10/dist/cdn.min.js"></script>
+        <style>
+            :root {
+                --bg-primary: #030712;
+                --bg-secondary: #0f172a;
+                --bg-tertiary: #1e293b;
+                --border-color: #374151;
+                --text-primary: #f1f5f9;
+                --text-secondary: #cbd5e1;
+                --text-muted: #94a3b8;
+                --accent-cyan: #22d3ee;
+                --accent-blue: #3b82f6;
+                /* Blue for Standard checkmarks */
+                --accent-amber: #facc15;
+                --font-sans: 'Inter', sans-serif;
+                --font-mono: 'Roboto Mono', monospace;
+                --white: #ffffff;
+                --accent-teal: #008080;
+                /* Teal for Premium checkmarks */
             }
 
-            .pricing-plan {
-                max-width: 360px;
-                padding: 35px;
+            *,
+            *::before,
+            *::after {
+                box-sizing: border-box;
             }
-        }
 
-        @media (max-width: 768px) {
+            html {
+                scroll-behavior: smooth;
+            }
+
+            body {
+                font-family: var(--font-sans);
+                line-height: 1.7;
+                margin: 0;
+                padding: 0;
+                background-color: var(--bg-primary);
+                color: var(--text-secondary);
+                font-size: 16px;
+                -webkit-font-smoothing: antialiased;
+                -moz-osx-font-smoothing: grayscale;
+            }
+
+            .container {
+                max-width: 1320px;
+                margin: 0 auto;
+                padding: 0 24px;
+                position: relative;
+                z-index: 2;
+            }
+
+            h1,
+            h2,
+            h3,
+            h4 {
+                margin-top: 0;
+                line-height: 1.3;
+                color: var(--text-primary);
+                font-weight: 700;
+            }
+
             h1 {
-                font-size: 2.5rem;
+                font-size: 3.2rem;
+                font-weight: 800;
+                text-align: center;
+                margin-bottom: 1.5rem;
             }
 
             h2 {
-                font-size: 2rem;
+                font-size: 2.8rem;
+                text-align: center;
+                margin-bottom: 1.5rem;
+            }
+
+            p {
+                margin-top: 0;
+                margin-bottom: 1.25rem;
+                font-size: 1.05rem;
+            }
+
+            a {
+                color: var(--accent-cyan);
+                text-decoration: none;
+                transition: color 0.3s ease;
+            }
+
+            a:hover {
+                color: #67e8f9;
+            }
+
+            section {
+                padding: 100px 0;
+                border-bottom: 1px solid var(--border-color);
+            }
+
+            section:last-of-type {
+                border-bottom: none;
             }
 
             .section-subtitle {
-                font-size: 1rem;
-                margin-bottom: 40px;
+                text-align: center;
+                font-size: 1.25rem;
+                color: var(--text-muted);
+                max-width: 850px;
+                margin: 0 auto 70px auto;
             }
 
-            .pricing-table {
-                flex-direction: column;
-                align-items: center;
+            .cta-button {
+                background: linear-gradient(90deg, var(--accent-cyan) 0%, var(--accent-blue) 100%);
+                color: var(--bg-primary);
+                padding: 14px 28px;
+                font-size: 1.05em;
+                font-weight: 700;
+                text-decoration: none;
+                border-radius: 8px;
+                transition: all 0.3s ease;
+                display: inline-block;
+                border: none;
+                cursor: pointer;
             }
 
-            .pricing-plan {
-                width: 95%;
-                max-width: 450px;
-                margin-bottom: 25px;
-            }
-
-            .nav-links {
-                display: none;
+            .cta-button:hover {
+                text-decoration: none;
+                box-shadow: 0 0 20px rgba(34, 211, 238, 0.6);
+                transform: scale(1.03);
             }
 
             header {
-                padding: 12px 0;
+                background-color: rgba(3, 7, 18, 0.7);
+                backdrop-filter: blur(15px);
+                padding: 20px 0;
+                border-bottom: 1px solid var(--border-color);
+                position: sticky;
+                top: 0;
+                z-index: 1000;
+            }
+
+            .header-content {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
             }
 
             .logo {
-                font-size: 1.5rem;
+                font-size: 1.9rem;
+                font-weight: 900;
+                color: var(--text-primary);
+                letter-spacing: -0.05em;
+            }
+
+            .logo .highlight {
+                color: var(--accent-cyan);
+            }
+
+            .nav-links a {
+                color: var(--text-secondary);
+                margin-left: 40px;
+                font-weight: 600;
+                font-size: 1rem;
+            }
+
+            .nav-links a:hover {
+                color: var(--white);
             }
 
             .header-cta {
-                display: none;
+                padding: 12px 25px;
+                font-size: 1rem;
             }
-        }
-    </style>
-</head>
 
-<body>
+            footer {
+                background-color: var(--bg-secondary);
+                border-top: 1px solid var(--border-color);
+                padding: 50px 0;
+                margin-top: 60px;
+                /* Keep margin */
+            }
 
-    <header>
-        <div class="container header-content">
-            <a href="/" class="logo">Acumenis</a>
-            <nav class="nav-links">
-                <a href="/">Home</a>
-                <a href="/pricing">Pricing</a>
-                <a href="/order">Order Now</a>
-            </nav>
-            <a href="/order" class="cta-button header-cta">Order Report</a>
-        </div>
-    </header>
+            footer .container {
+                text-align: center;
+            }
 
-    <main>
-        <section id="pricing-details">
-            <div class="container">
-                <h1>Intelligence Tiers</h1>
-                <p class="section-subtitle">Select the depth of AI analysis required for your strategic needs. Both
-                    tiers offer industry-leading speed and data synthesis, powered by our advanced AI core.</p>
+            footer a {
+                color: var(--text-muted);
+                /* Use muted for footer links */
+                margin: 0 10px;
+                /* Slightly reduce margin */
+                font-size: 0.9rem;
+            }
 
-                <div class="pricing-table">
-                    <div class="pricing-plan standard">
-                        <h3>Standard Report</h3>
-                        <p class="plan-desc">Rapid, comprehensive overview for quick decisions and market understanding.
-                        </p>
-                        <div class="price">$499</div>
-                        <div class="price-term">One-Time Payment</div>
-                        <div class="anchor-price"><s>$1497 Industry Value</s></div>
-                        <ul>
-                            <li>Core Market Landscape Analysis</li>
-                            <li>Top 3-5 Competitor Overview</li>
-                            <li>Key Trend Identification</li>
-                            <li>Standard AI Analysis Depth</li>
-                            <li>Sourced Data References</li>
-                            <li>Visualized Key Findings</li>
-                            <li>Turnaround: ~12 Business Hours</li>
-                            <li>Format: PDF Report</li>
-                        </ul>
-                        <a href="/order?plan=standard_499" class="cta-button">Initiate Standard Analysis</a>
-                    </div>
+            footer a:hover {
+                color: var(--text-secondary);
+            }
 
-                    <div class="pricing-plan premium">
-                        <div class="premium-badge">Premium</div>
-                        <h3>Premium Deep Dive</h3>
-                        <p class="plan-desc">Maximum depth analysis with strategic recommendations for critical
-                            decision-making.</p>
-                        <div class="price">$999</div>
-                        <div class="price-term">One-Time Payment</div>
-                        <div class="anchor-price"><s>$2997 Industry Value</s></div>
-                        <ul>
-                            <li>In-Depth Market Segmentation & Sizing</li>
-                            <li>Extensive Competitor Profiling (5-10+)</li>
-                            <li>Predictive Trend Analysis & Forecasting</li>
-                            <li>Maximum AI Analysis Depth & Nuance</li>
-                            <li>Actionable Strategic Recommendations</li>
-                            <li>SWOT Analysis Integration</li>
-                            <li>Raw Data Export Option (CSV/JSON)</li>
-                            <li>Priority Turnaround: < 6 Business Hours</li>
-                            <li>Format: PDF Report + Data Files + Executive Summary</li>
-                        </ul>
-                        <a href="/order?plan=premium_999" class="cta-button">Initiate Premium Deep Dive</a>
-                    </div>
-                </div>
-            </div>
-        </section>
+            footer p {
+                margin: 10px 0 0 0;
+                font-size: 0.9rem;
+                color: var(--text-muted);
+            }
 
-        <section id="faq">
-            <div class="container faq-container">
-                <h2>Common Questions</h2>
-                <div class="faq-item">
-                    <div class="faq-question"><span>What kind of data sources does the AI use?</span></div>
-                    <div class="faq-answer">
-                        <p>Our AI leverages a vast array of publicly available data, including market reports, news
-                            articles, financial filings, company websites, academic papers, industry publications,
-                            government data, social media sentiment (where applicable), and more. The system prioritizes
-                            reputable sources and cross-references information for accuracy. The underlying
-                            `open-deep-research` tool orchestrates the data gathering based on your query.</p>
-                    </div>
-                </div>
-                <div class="faq-item">
-                    <div class="faq-question"><span>How specific can my research request be?</span></div>
-                    <div class="faq-answer">
-                        <p>Extremely specific! The more detail you provide in the "Research Topic/Details" field on the
-                            order form, the more targeted and valuable your report will be. Ask direct questions, define
-                            specific competitors or market segments, request analysis for particular timeframes or
-                            regions. Our AI thrives on clear parameters.</p>
-                    </div>
-                </div>
-                <div class="faq-item">
-                    <div class="faq-question"><span>Is my research request and data kept confidential?</span></div>
-                    <div class="faq-answer">
-                        <p>Yes, 100%. Confidentiality is paramount. Your research request, company details, and the
-                            generated report are treated as highly sensitive information and are protected by robust
-                            security measures. We do not share or resell your data.</p>
-                    </div>
-                </div>
-                <div class="faq-item">
-                    <div class="faq-question"><span>What is the typical length or format of the report?</span></div>
-                    <div class="faq-answer">
-                        <p>Reports are typically delivered as comprehensive PDF documents. Length varies based on the
-                            complexity of the request and the report tier (Premium reports are generally more
-                            extensive). They include executive summaries, key findings, detailed analysis sections, data
-                            visualizations (charts/graphs where applicable), and source references. Premium reports may
-                            include raw data exports.</p>
-                    </div>
-                </div>
-                <div class="faq-item">
-                    <div class="faq-question"><span>What if I need revisions or have follow-up questions?</span></div>
-                    <div class="faq-answer">
-                        <p>Due to the automated, high-speed nature of the AI generation, we currently do not offer
-                            iterative revisions. However, the Premium Deep Dive includes more extensive analysis
-                            designed to anticipate follow-up needs. For truly complex, ongoing research partnerships,
-                            please contact us to discuss custom enterprise solutions.</p>
-                    </div>
-                </div>
-                <div class="faq-item">
-                    <div class="faq-question"><span>How does the payment process work?</span></div>
-                    <div class="faq-answer">
-                        <p>We partner with Lemon Squeezy for secure payment processing. After submitting your order
-                            details, you'll be redirected to their secure checkout page to complete your payment via
-                            credit card or other supported methods. Acumenis never handles or stores your full payment
-                            information.</p>
-                    </div>
-                </div>
-            </div>
-        </section>
-    </main>
+            /* Pricing Page Specific */
+            #pricing-details {
+                background-color: var(--bg-primary);
+            }
 
-    <footer>
-        <div class="container">
-            <p>© <span id="year"></span> Acumenis. All Rights Reserved.</p>
-            <p><a href="/">Home</a> | <a href="/pricing">Pricing</a> | <a href="/order">Order</a> | Privacy Policy (TBD)
-                | Terms of Service (TBD)</p>
-        </div>
-    </footer>
+            .pricing-table {
+                display: flex;
+                justify-content: center;
+                gap: 40px;
+                flex-wrap: wrap;
+                align-items: stretch;
+                margin-bottom: 80px;
+            }
 
-    <script>
-        document.getElementById('year').textContent = new Date().getFullYear();
+            .pricing-plan {
+                border: 1px solid var(--border-color);
+                border-radius: 12px;
+                padding: 45px;
+                text-align: center;
+                width: 100%;
+                max-width: 480px;
+                background: var(--bg-secondary);
+                display: flex;
+                flex-direction: column;
+                justify-content: space-between;
+                transition: transform 0.3s ease, box-shadow 0.3s ease;
+                position: relative;
+                overflow: hidden;
+            }
 
-        // FAQ Accordion
-        const faqItems = document.querySelectorAll('.faq-item');
-        faqItems.forEach(item => {
-            const question = item.querySelector('.faq-question');
-            question.addEventListener('click', () => {
-                const currentlyActive = document.querySelector('.faq-item.active');
-                if (currentlyActive && currentlyActive !== item) {
-                    currentlyActive.classList.remove('active');
+            .pricing-plan::after {
+                content: '';
+                position: absolute;
+                inset: -1px;
+                border-radius: 13px;
+                background: linear-gradient(120deg, transparent, var(--accent-blue), transparent);
+                opacity: 0;
+                transition: opacity 0.4s ease;
+                z-index: -1;
+                filter: blur(15px);
+            }
+
+            .pricing-plan.premium {
+                border-color: var(--accent-teal);
+                /* Premium border is teal */
+                border-width: 2px;
+            }
+
+            .pricing-plan.premium::after {
+                background: linear-gradient(120deg, transparent, var(--accent-teal), transparent);
+                /* Premium glow is teal */
+            }
+
+            .pricing-plan:hover {
+                transform: translateY(-10px);
+                box-shadow: 0 15px 40px rgba(0, 0, 0, 0.4);
+            }
+
+            .pricing-plan:hover::after {
+                opacity: 0.3;
+            }
+
+            .pricing-plan h3 {
+                font-size: 2rem;
+                font-weight: 700;
+                /* color: var(--accent-teal); */
+                /* Remove default, set per plan */
+                margin-bottom: 10px;
+            }
+
+            .pricing-plan.standard h3 {
+                color: var(--accent-blue);
+                /* Standard title blue */
+            }
+
+            .pricing-plan.premium h3 {
+                color: var(--accent-teal);
+                /* Premium title teal */
+            }
+
+
+            .pricing-plan .plan-desc {
+                font-size: 1.05rem;
+                color: var(--text-muted);
+                margin-bottom: 30px;
+                min-height: 45px;
+            }
+
+            .pricing-plan .price {
+                font-size: 4.5rem;
+                font-weight: 900;
+                /* color: var(--accent-teal); */
+                /* Remove default, set per plan */
+                margin-bottom: 5px;
+                line-height: 1;
+            }
+
+            .pricing-plan.standard .price {
+                color: var(--accent-blue);
+                /* Standard price blue */
+            }
+
+            .pricing-plan.premium .price {
+                color: var(--accent-teal);
+                /* Premium price teal */
+            }
+
+            .pricing-plan .price-term {
+                font-size: 1rem;
+                color: var(--text-muted);
+                margin-bottom: 20px;
+            }
+
+            .pricing-plan .anchor-price {
+                text-decoration: line-through;
+                color: var(--text-muted);
+                font-size: 1.1em;
+                margin-bottom: 30px;
+                display: block;
+                opacity: 0.7;
+            }
+
+            .pricing-plan ul {
+                list-style: none;
+                padding: 0;
+                margin: 40px 0;
+                color: var(--text-secondary);
+                text-align: left;
+                flex-grow: 1;
+                font-size: 1rem;
+            }
+
+            .pricing-plan ul li {
+                margin-bottom: 18px;
+                display: flex;
+                align-items: flex-start;
+            }
+
+            .pricing-plan ul li svg {
+                width: 22px;
+                /* Use consistent size */
+                height: 22px;
+                margin-right: 15px;
+                flex-shrink: 0;
+                margin-top: 4px;
+            }
+
+            .pricing-plan .cta-button {
+                margin-top: auto;
+                width: 100%;
+                /* background: var(--accent-teal); */
+                /* Remove default, set per plan */
+                color: var(--bg-primary);
+                font-weight: 700;
+                padding: 18px;
+                font-size: 1.15rem;
+            }
+
+            .pricing-plan.standard .cta-button {
+                background: var(--accent-blue);
+                color: var(--white);
+                /* Better contrast for blue */
+            }
+
+            .pricing-plan.standard .cta-button:hover {
+                background: #2563eb;
+                box-shadow: 0 0 20px rgba(56, 189, 248, 0.5);
+            }
+
+            .pricing-plan.premium .cta-button {
+                background: var(--accent-teal);
+                color: var(--bg-primary);
+                /* Dark text on teal */
+            }
+
+            .pricing-plan.premium .cta-button:hover {
+                background: #006666;
+                box-shadow: 0 0 20px rgba(0, 128, 128, 0.5);
+            }
+
+            /* === CORRECTED: Pricing Checkmark Icon Styling === */
+            /* Default state (applies to both unless overridden) */
+            .pricing-plan ul li svg {
+                fill: var(--bg-primary);
+                /* Circle background is dark */
+                filter: none;
+                stroke: none;
+                stroke-width: 0;
+            }
+
+            .pricing-plan ul li svg path {
+                stroke: none;
+                stroke-width: 0;
+            }
+
+            /* Standard Plan Checkmarks ($499) */
+            .pricing-plan.standard ul li svg path {
+                fill: var(--accent-blue);
+                /* Checkmark is BLUE */
+            }
+
+            /* Premium Plan Checkmarks ($999) */
+            .pricing-plan.premium ul li svg path {
+                fill: var(--accent-teal);
+                /* Checkmark is TEAL */
+            }
+
+            /* === END CORRECTED === */
+
+
+            #faq {
+                background-color: var(--bg-secondary);
+                border-top: 1px solid var(--border-color);
+            }
+
+            #faq h2 {
+                color: var(--text-primary);
+            }
+
+            .faq-container {
+                max-width: 950px;
+                margin: 0 auto;
+            }
+
+            .faq-item {
+                border-bottom: 1px solid var(--border-color);
+                padding: 30px 0;
+            }
+
+            .faq-item:last-child {
+                border-bottom: none;
+            }
+
+            .faq-question {
+                font-weight: 600;
+                color: var(--text-primary);
+                font-size: 1.25em;
+                cursor: pointer;
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+            }
+
+            .faq-question span {
+                transition: color 0.3s ease;
+            }
+
+            .faq-question:hover span {
+                color: var(--accent-cyan);
+            }
+
+            .faq-question .icon {
+                font-size: 1.5em;
+                color: var(--accent-cyan);
+                transition: transform 0.3s ease;
+                line-height: 1;
+                font-weight: bold;
+            }
+
+            .faq-answer {
+                max-height: 0;
+                overflow: hidden;
+                transition: max-height 0.5s ease-out, padding-top 0.5s ease-out, opacity 0.5s ease-out;
+                color: var(--text-secondary);
+                padding-top: 0;
+                opacity: 0;
+                font-size: 1.05rem;
+            }
+
+            .faq-item[x-data] .faq-answer[x-show="open"] {
+                max-height: 600px;
+                padding-top: 25px;
+                opacity: 1;
+            }
+
+            .faq-item[x-data][x-bind\:class="{'active': open}"] .faq-question .icon {
+                transform: rotate(45deg);
+            }
+
+            .tier-guide {
+                background-color: var(--bg-tertiary);
+                padding: 60px;
+                border-radius: 12px;
+                margin-top: 80px;
+                border: 1px solid var(--border-color);
+            }
+
+            .tier-guide h3 {
+                text-align: center;
+                color: var(--text-primary);
+                font-size: 2rem;
+                margin-bottom: 30px;
+            }
+
+            .tier-guide p {
+                color: var(--text-secondary);
+                text-align: left;
+                max-width: 800px;
+                margin: 0 auto 25px auto;
+                font-size: 1.1rem;
+            }
+
+            .tier-guide strong {
+                color: var(--text-primary);
+                font-weight: 600;
+            }
+
+            @media (max-width: 992px) {
+                h1 {
+                    font-size: 2.8rem;
                 }
-                item.classList.toggle('active');
-            });
-        });
-    </script>
-</body>
 
-</html>
+                h2 {
+                    font-size: 2.4rem;
+                }
+
+                section {
+                    padding: 80px 0;
+                }
+
+                .pricing-table {
+                    gap: 25px;
+                }
+
+                .pricing-plan {
+                    max-width: 380px;
+                    padding: 35px;
+                }
+            }
+
+            @media (max-width: 768px) {
+                body {
+                    font-size: 15px;
+                }
+
+                h1 {
+                    font-size: 2.5rem;
+                }
+
+                h2 {
+                    font-size: 2rem;
+                }
+
+                .section-subtitle {
+                    font-size: 1.1rem;
+                    margin-bottom: 50px;
+                }
+
+                .pricing-table {
+                    flex-direction: column;
+                    align-items: center;
+                }
+
+                .pricing-plan {
+                    width: 95%;
+                    max-width: 450px;
+                    margin-bottom: 30px;
+                }
+
+                .nav-links {
+                    display: none;
+                }
+
+                header {
+                    padding: 15px 0;
+                }
+
+                .logo {
+                    font-size: 1.6rem;
+                }
+
+                .header-cta {
+                    display: none;
+                }
+            }
+        </style>
+    </head>
+
+    <body>
+        <header>
+            <div class="container header-content">
+                <a href="/" class="logo">Acumenis<span class="highlight">.</span></a>
+                <nav class="nav-links">
+                    <a href="/">Home</a>
+                    <a href="/pricing">Pricing</a>
+                    <a href="/order">Order Now</a>
+                </nav>
+                <a href="/order" class="cta-button header-cta">Initiate Analysis</a>
+            </div>
+        </header>
+
+        <main>
+            <section id="pricing-details">
+                <div class="container">
+                    <h1>Intelligence Access Protocols</h1>
+                    <p class="section-subtitle">Select the protocol that aligns with your strategic imperatives. Both
+                        leverage the Acumenis AI Core for unparalleled speed and depth, transforming raw data into
+                        decisive
+                        intelligence.</p>
+
+                    <div class="pricing-table">
+                        <div class="pricing-plan standard">
+                            <h3>Standard Stream</h3>
+                            <p class="plan-desc">Focused intelligence feed for tactical awareness and rapid market
+                                validation.</p>
+                            <div class="price">$499</div>
+                            <div class="price-term">Per Analysis Request</div>
+                            <div class="anchor-price"><s>$1497 Industry Value</s></div>
+                            <ul>
+                                <!-- Standard Checkmarks: Dark Circle, BLUE Check -->
+                                <li><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                                        <path fill-rule="evenodd"
+                                            d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z"
+                                            clip-rule="evenodd" />
+                                    </svg>Core Market Landscape Scan</li>
+                                <li><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                                        <path fill-rule="evenodd"
+                                            d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z"
+                                            clip-rule="evenodd" />
+                                    </svg>Top 3-5 Competitor Vector Analysis</li>
+                                <li><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                                        <path fill-rule="evenodd"
+                                            d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z"
+                                            clip-rule="evenodd" />
+                                    </svg>Key Trend Identification & Impact</li>
+                                <li><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                                        <path fill-rule="evenodd"
+                                            d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z"
+                                            clip-rule="evenodd" />
+                                    </svg>Standard AI Synthesis Depth</li>
+                                <li><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                                        <path fill-rule="evenodd"
+                                            d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z"
+                                            clip-rule="evenodd" />
+                                    </svg>Sourced Data References</li>
+                                <li><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                                        <path fill-rule="evenodd"
+                                            d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z"
+                                            clip-rule="evenodd" />
+                                    </svg>Visualized Key Findings</li>
+                                <li><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                                        <path fill-rule="evenodd"
+                                            d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z"
+                                            clip-rule="evenodd" />
+                                    </svg>Turnaround: ~12 Business Hours</li>
+                                <li><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                                        <path fill-rule="evenodd"
+                                            d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z"
+                                            clip-rule="evenodd" />
+                                    </svg>Format: PDF Synthesis Report</li>
+                            </ul>
+                            <a href="/order?plan=standard_499" class="cta-button">[ Initiate Standard Stream ]</a>
+                        </div>
+
+                        <div class="pricing-plan premium">
+                            <h3>Nexus Deep Dive</h3>
+                            <p class="plan-desc">Maximum depth synthesis with strategic foresight for high-stakes
+                                initiatives.</p>
+                            <div class="price">$999</div>
+                            <div class="price-term">Per Analysis Request</div>
+                            <div class="anchor-price"><s>$2997 Industry Value</s></div>
+                            <ul>
+                                <!-- Premium Checkmarks: Dark Circle, TEAL Check -->
+                                <li><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                                        <path fill-rule="evenodd"
+                                            d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z"
+                                            clip-rule="evenodd" />
+                                    </svg>In-Depth Market Segmentation & Opportunity Sizing</li>
+                                <li><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                                        <path fill-rule="evenodd"
+                                            d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z"
+                                            clip-rule="evenodd" />
+                                    </svg>Extensive Competitor Deconstruction (5-10+)</li>
+                                <li><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                                        <path fill-rule="evenodd"
+                                            d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z"
+                                            clip-rule="evenodd" />
+                                    </svg>Predictive Trajectory Modeling & Scenarios</li>
+                                <li><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                                        <path fill-rule="evenodd"
+                                            d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z"
+                                            clip-rule="evenodd" />
+                                    </svg>Maximum AI Synthesis Depth & Nuance</li>
+                                <li><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                                        <path fill-rule="evenodd"
+                                            d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z"
+                                            clip-rule="evenodd" />
+                                    </svg>Actionable Strategic Recommendations</li>
+                                <li><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                                        <path fill-rule="evenodd"
+                                            d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z"
+                                            clip-rule="evenodd" />
+                                    </svg>Integrated SWOT / PESTLE Frameworks</li>
+                                <li><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                                        <path fill-rule="evenodd"
+                                            d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z"
+                                            clip-rule="evenodd" />
+                                    </svg>Raw Data & Source Link Export (CSV/JSON)</li>
+                                <li><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                                        <path fill-rule="evenodd"
+                                            d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z"
+                                            clip-rule="evenodd" />
+                                    </svg>Priority Queue Turnaround: < 6 Business Hours</li>
+                                <li><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                                        <path fill-rule="evenodd"
+                                            d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z"
+                                            clip-rule="evenodd" />
+                                    </svg>Format: PDF Report + Data Files + Exec Briefing Deck</li>
+                            </ul>
+                            <a href="/order?plan=premium_999" class="cta-button">[ Initiate Nexus Deep Dive ]</a>
+                        </div>
+                    </div>
+
+                    <div class="tier-guide">
+                        <h3>Which Protocol Fits Your Mission?</h3>
+                        <p>Choose <strong>Standard Stream</strong> for rapid situational awareness, validating initial
+                            hypotheses, quick competitor snapshots, informing tactical marketing adjustments, or when
+                            core
+                            data is needed efficiently.</p>
+                        <p>Select <strong>Nexus Deep Dive</strong> for critical strategic planning (new market entry,
+                            product launches), comprehensive competitive warfare analysis, investor relations &
+                            fundraising
+                            support, M&A due diligence, or identifying truly disruptive opportunities.</p>
+                        <p style="text-align: center; margin-top: 30px;"><a href="/order" class="cta-button"
+                                style="background: var(--bg-tertiary); color: var(--accent-cyan); border: 1px solid var(--accent-cyan);">Initiate
+                                Your Analysis Now</a></p>
+                    </div>
+                </div>
+            </section>
+
+            <section id="faq">
+                <div class="container faq-container">
+                    <h2>Intelligence Protocol Queries</h2>
+                    <div class="faq-item" x-data="{ open: false }">
+                        <div class="faq-question" @click="open = !open">
+                            <span>What specific data sources power the Acumenis AI Core?</span>
+                            <span class="icon" x-text="open ? '-' : '+'"
+                                x-bind:style="open ? 'transform: rotate(45deg);' : ''"></span>
+                        </div>
+                        <div class="faq-answer" x-show="open" x-transition.opacity.duration.500ms>
+                            <p>Our AI dynamically leverages a vast, multi-vector data corpus. This includes, but is not
+                                limited to: real-time global news feeds (Dow Jones, Reuters, Bloomberg where accessible,
+                                plus thousands of niche sources), financial market data APIs (e.g., SEC EDGAR, Alpha
+                                Vantage), regulatory databases (FDA, EMA, etc.), academic research portals (arXiv,
+                                PubMed,
+                                CORE), international patent repositories (USPTO, EPO, WIPO), specialized industry
+                                analyst
+                                reports (Gartner, Forrester snippets where permissible), social media trend APIs
+                                (monitoring
+                                aggregate sentiment and keyword velocity), web crawl intelligence (indexed company
+                                websites,
+                                forums, review aggregators), and government statistical databases (BEA, Eurostat, etc.).
+                                The
+                                system prioritizes reputable sources and cross-validates findings for enhanced
+                                reliability.
+                            </p>
+                        </div>
+                    </div>
+                    <div class="faq-item" x-data="{ open: false }">
+                        <div class="faq-question" @click="open = !open">
+                            <span>How detailed should my 'Intelligence Objective' be for best results?</span>
+                            <span class="icon" x-text="open ? '-' : '+'"
+                                x-bind:style="open ? 'transform: rotate(45deg);' : ''"></span>
+                        </div>
+                        <div class="faq-answer" x-show="open" x-transition.opacity.duration.500ms>
+                            <p>Think of it as briefing a highly specialized (and incredibly fast) intelligence analyst.
+                                Maximum specificity yields maximum value. Include:
+                            <ul
+                                style="margin-top: 15px; padding-left: 20px; list-style-type: '→ '; color: var(--text-secondary);">
+                                <li><strong>Clear Subject:</strong> The company, product, market, or technology.</li>
+                                <li><strong>Scope:</strong> Geographic region(s), industry vertical(s), customer
+                                    segment(s).
+                                </li>
+                                <li><strong>Key Questions:</strong> What specific answers do you need? (e.g., "What is
+                                    Competitor X's pricing strategy for Product Y in Europe?", "What are the top 3
+                                    adoption
+                                    barriers for Z technology?").</li>
+                                <li><strong>Competitors (if applicable):</strong> List known competitors or define
+                                    characteristics.</li>
+                                <li><strong>Timeframe:</strong> Specify if you need historical analysis, current state,
+                                    or
+                                    future projections (e.g., "last 12 months", "next 3 years").</li>
+                                <li><strong>Desired Outcome:</strong> What decision will this report inform? (e.g.,
+                                    "Inform
+                                    market entry decision", "Refine product roadmap", "Prepare for investor meeting").
+                                </li>
+                            </ul>
+                            The more parameters you provide, the more precisely the AI can target its synthesis.
+                            </p>
+                        </div>
+                    </div>
+                    <div class="faq-item" x-data="{ open: false }">
+                        <div class="faq-question" @click="open = !open">
+                            <span>Is the analysis process and my data kept confidential?</span>
+                            <span class="icon" x-text="open ? '-' : '+'"
+                                x-bind:style="open ? 'transform: rotate(45deg);' : ''"></span>
+                        </div>
+                        <div class="faq-answer" x-show="open" x-transition.opacity.duration.500ms>
+                            <p>Absolute confidentiality is architected into the system. 1) Your specific query
+                                parameters
+                                and identifying information are processed in isolated, ephemeral environments. 2) The AI
+                                models used for synthesis (like Gemini 2.5 Pro via OpenRouter) are accessed via secure
+                                APIs
+                                and do not retain your specific query data for their own training post-request. 3) The
+                                proprietary backend processes operate solely on publicly available or licensed data
+                                sources and never interface with your internal systems. 4) All generated reports and
+                                associated
+                                metadata are stored encrypted at rest within our secure database infrastructure. We
+                                adhere
+                                to strict data privacy protocols. NDAs are available for enterprise clients requiring
+                                further assurance.</p>
+                        </div>
+                    </div>
+                    <div class="faq-item" x-data="{ open: false }">
+                        <div class="faq-question" @click="open = !open">
+                            <span>What is the output format and structure?</span>
+                            <span class="icon" x-text="open ? '-' : '+'"
+                                x-bind:style="open ? 'transform: rotate(45deg);' : ''"></span>
+                        </div>
+                        <div class="faq-answer" x-show="open" x-transition.opacity.duration.500ms>
+                            <p>Both tiers provide professionally structured PDF reports designed for clarity and
+                                actionability. Key sections typically include:
+                            <ul
+                                style="margin-top: 15px; padding-left: 20px; list-style-type: '→ '; color: var(--text-secondary);">
+                                <li><strong>Executive Summary:</strong> High-level findings and key takeaways (more
+                                    strategic in Premium).</li>
+                                <li><strong>Analysis Sections:</strong> Detailed breakdown based on your query (e.g.,
+                                    Market
+                                    Size & Growth, Competitor Profiles, Trend Analysis).</li>
+                                <li><strong>Data Visualizations:</strong> Charts and graphs illustrating key data points
+                                    and
+                                    trends.</li>
+                                <li><strong>Key Insights & Synthesis:</strong> AI-generated interpretation of the data
+                                    and
+                                    its implications.</li>
+                                <li><strong>Strategic Recommendations (Premium Only):</strong> Actionable options based
+                                    on
+                                    the analysis.</li>
+                                <li><strong>Source Appendix:</strong> References and links to key data sources used.
+                                </li>
+                            </ul>
+                            The Premium tier adds an Executive Briefing Deck (PPTX) and optional raw data exports
+                            (CSV/JSON).
+                            </p>
+                        </div>
+                    </div>
+                    <div class="faq-item" x-data="{ open: false }">
+                        <div class="faq-question" @click="open = !open">
+                            <span>What if I need revisions or have follow-up questions?</span>
+                            <span class="icon" x-text="open ? '-' : '+'"
+                                x-bind:style="open ? 'transform: rotate(45deg);' : ''"></span>
+                        </div>
+                        <div class="faq-answer" x-show="open" x-transition.opacity.duration.500ms>
+                            <p>Acumenis is optimized for high-speed, autonomous synthesis based on your initial
+                                objective
+                                definition. Direct interaction or iterative revisions are not part of the standard
+                                protocols
+                                to maintain velocity. However, the Premium Deep Dive's depth and inclusion of strategic
+                                recommendations often preempt the need for immediate follow-up. If you believe the
+                                report
+                                significantly deviates from your *clearly stated objective* or contains factual
+                                inaccuracies
+                                traceable to the AI synthesis, contact support within 48 hours with specific details.
+                                While
+                                refunds are generally not offered due to the computational resources expended, we will
+                                review verifiable discrepancies on a case-by-case basis.</p>
+                        </div>
+                    </div>
+                    <div class="faq-item" x-data="{ open: false }">
+                        <div class="faq-question" @click="open = !open">
+                            <span>How is payment handled securely?</span>
+                            <span class="icon" x-text="open ? '-' : '+'"
+                                x-bind:style="open ? 'transform: rotate(45deg);' : ''"></span>
+                        </div>
+                        <div class="faq-answer" x-show="open" x-transition.opacity.duration.500ms>
+                            <p>All financial transactions are processed securely via our partner Lemon Squeezy, a
+                                globally
+                                trusted payment processor that is fully PCI DSS Level 1 compliant (the highest security
+                                standard). When you initiate analysis, you are transferred to Lemon Squeezy's secure,
+                                encrypted checkout environment to enter your payment details. Acumenis systems never
+                                directly handle or stores your full credit card or sensitive payment information,
+                                ensuring
+                                your financial data remains protected.</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <footer>
+            <div class="container">
+                <p>© <span id="year">2025</span> Acumenis // AI Insight Engine.</p> <!-- Updated Year -->
+                <p>
+                    <a href="/">Home</a> |
+                    <a href="/pricing">Tiers</a> |
+                    <a href="/order">Initiate</a> |
+                    <a href="/privacy">Privacy Policy</a> | <!-- Added Link -->
+                    <a href="/terms">Terms of Service</a> | <!-- Added Link -->
+                    <a href="mailto:support@acumenis.ai">support@acumenis.ai</a> <!-- Added Email -->
+                </p>
+            </div>
+        </footer>
+
+        <script>
+            // Keep script if needed, but year is hardcoded now
+            // document.getElementById('year').textContent = new Date().getFullYear();
+            // Or update to 2025 if dynamic is preferred:
+            document.getElementById('year').textContent = '2025';
+        </script>
+    </body>
+
+    </html>
+</price>

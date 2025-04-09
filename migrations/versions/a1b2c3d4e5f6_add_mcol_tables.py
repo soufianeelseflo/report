@@ -1,8 +1,8 @@
 """Add MCOL tables (KpiSnapshot, McolDecisionLog)
 
 Revision ID: a1b2c3d4e5f6
-Revises: 9a1b2c3d4e5f # Points to the previous migration's revision ID
-Create Date: 2025-04-07 20:01:00.000000 
+Revises: 9a1b2c3d4e5f 
+Create Date: 2025-04-08 12:01:00.000000 
 
 """
 from typing import Sequence, Union
@@ -13,7 +13,7 @@ from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
 revision: str = 'a1b2c3d4e5f6'
-down_revision: Union[str, None] = '9a1b2c3d4e5f' # MUST match revision ID of the previous file
+down_revision: Union[str, None] = '9a1b2c3d4e5f' # Points to the previous migration's revision ID
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

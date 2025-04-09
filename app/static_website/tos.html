@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Acumenis // Terms of Service</title>
+    <meta name="description" content="Terms of Service for Acumenis AI Insight Engine.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;900&family=Roboto+Mono:wght@400;700&display=swap"
+        rel="stylesheet">
+    <style>
+        :root {
+            --bg-primary: #030712;
+            --bg-secondary: #0f172a;
+            --bg-tertiary: #1e293b;
+            --border-color: #334155;
+            --text-primary: #f1f5f9;
+            --text-secondary: #cbd5e1;
+            --text-muted: #94a3b8;
+            --accent-cyan: #22d3ee;
+            --accent-blue: #3b82f6;
+            --accent-red-muted: #9ca3af;
+            --font-sans: 'Inter', sans-serif;
+            --font-mono: 'Roboto Mono', monospace;
+            --white: #ffffff;
+            --accent-teal: #008080;
+        }
+
+        *,
+        *::before,
+        *::after {
+            box-sizing: border-box;
+        }
+
+        html {
+            scroll-behavior: smooth;
+        }
+
+        body {
+            font-family: var(--font-sans);
+            line-height: 1.7;
+            margin: 0;
+            padding: 0;
+            background-color: var(--bg-primary);
+            color: var(--text-secondary);
+            font-size: 16px;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+            overflow-x: hidden;
+            position: relative;
+        }
+
+        body::before {
+            content: '';
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-image: linear-gradient(var(--border-color) 1px, transparent 1px), linear-gradient(to right, var(--border-color) 1px, transparent 1px);
+            background-size: 60px 60px;
+            opacity: 0.03;
+            z-index: -1;
+            animation: bg-scroll 90s linear infinite;
+        }
+
+        @keyframes bg-scroll {
+            from {
+                background-position: 0 0;
+            }
+
+            to {
+                background-position: -600px -600px;
+            }
+        }
+
+        .main-wrapper {
+            background-color: transparent;
+            position: relative;
+            z-index: 1;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .container {
+            max-width: 900px;
+            /* Slightly narrower for readability */
+            margin: 0 auto;
+            padding: 0 24px;
+            flex-grow: 1;
+        }
+
+        header {
+            background-color: rgba(3, 7, 18, 0.6);
+            backdrop-filter: blur(16px);
+            padding: 20px 0;
+            border-bottom: 1px solid var(--border-color);
+            margin-bottom: 60px;
+            /* Space before content */
+        }
+
+        .header-content {
+            max-width: 1280px;
+            margin: 0 auto;
+            padding: 0 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .logo {
+            font-size: 1.9rem;
+            font-weight: 900;
+            color: var(--text-primary);
+            letter-spacing: -0.05em;
+            text-decoration: none;
+        }
+
+        .logo .highlight {
+            color: var(--accent-cyan);
+        }
+
+        h1,
+        h2,
+        h3 {
+            margin-top: 2em;
+            margin-bottom: 1em;
+            line-height: 1.3;
+            color: var(--text-primary);
+            font-weight: 700;
+        }
+
+        h1 {
+            font-size: 2.5rem;
+            font-weight: 800;
+            text-align: center;
+            margin-top: 0;
+            color: var(--accent-cyan);
+        }
+
+        h2 {
+            font-size: 1.8rem;
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 0.5em;
+        }
+
+        h3 {
+            font-size: 1.4rem;
+            color: var(--accent-teal);
+        }
+
+        p,
+        ul,
+        li {
+            margin-bottom: 1.25rem;
+            font-size: 1.05rem;
+            color: var(--text-secondary);
+        }
+
+        ul {
+            padding-left: 25px;
+        }
+
+        li {
+            margin-bottom: 0.75rem;
+        }
+
+        a {
+            color: var(--accent-cyan);
+            text-decoration: none;
+            transition: color 0.3s ease;
+        }
+
+        a:hover {
+            color: #67e8f9;
+            text-decoration: underline;
+        }
+
+        strong {
+            color: var(--text-primary);
+            font-weight: 600;
+        }
+
+        code {
+            font-family: var(--font-mono);
+            background-color: var(--bg-secondary);
+            padding: 0.2em 0.4em;
+            border-radius: 4px;
+            font-size: 0.9em;
+            color: var(--accent-cyan);
+        }
+
+        footer {
+            background-color: var(--bg-primary);
+            border-top: 1px solid var(--border-color);
+            padding: 40px 0;
+            margin-top: 80px;
+            /* Space after content */
+        }
+
+        footer .container {
+            max-width: 1280px;
+            text-align: center;
+        }
+
+        footer a {
+            color: var(--text-muted);
+            margin: 0 15px;
+            font-size: 0.9rem;
+        }
+
+        footer a:hover {
+            color: var(--text-secondary);
+        }
+
+        footer p {
+            margin: 10px 0 0 0;
+            font-size: 0.9rem;
+            color: var(--text-muted);
+        }
+    </style>
+</head>
+
+<body>
+    <div class="main-wrapper">
+        <header>
+            <div class="header-content">
+                <a href="/" class="logo">Acumenis<span class="highlight">.</span></a>
+                <!-- Optional: Add navigation back to home -->
+            </div>
+        </header>
+
+        <div class="container">
+            <h1>Terms of Service</h1>
+            <p><strong>Effective Date:</strong> [Insert Date - IMPORTANT: Update this]</p>
+            <p><strong>Last Updated:</strong> [Insert Date - IMPORTANT: Update this]</p>
+
+            <p>Welcome to Acumenis ("Acumenis," "we," "us," or "our"). These Terms of Service ("Terms") govern your
+                access to and use of the Acumenis website, AI Insight Engine, reports, and related services
+                (collectively, the "Service"). By accessing or using the Service, you agree to be bound by these Terms.
+            </p>
+
+            <p><strong>PLEASE READ THESE TERMS CAREFULLY. THEY CONTAIN IMPORTANT INFORMATION REGARDING YOUR LEGAL
+                    RIGHTS, REMEDIES, AND OBLIGATIONS, INCLUDING VARIOUS LIMITATIONS AND EXCLUSIONS, AND A DISPUTE
+                    RESOLUTION CLAUSE THAT GOVERNS HOW DISPUTES WILL BE RESOLVED.</strong></p>
+
+            <h2>1. Acceptance of Terms</h2>
+            <p>By creating an account, placing an order, or otherwise accessing or using any part of the Service, you
+                acknowledge that you have read, understood, and agree to be bound by these Terms and our Privacy Policy
+                (available at <a href="/privacy">/privacy</a>), which is incorporated herein by reference. If you do not
+                agree to these Terms, you may not access or use the Service.</p>
+            <p>If you are using the Service on behalf of an entity, organization, or company, you represent and warrant
+                that you have the authority to bind that entity to these Terms, and you agree to be bound by these Terms
+                on behalf of that entity.</p>
+
+            <h2>2. Description of Service</h2>
+            <p>Acumenis provides an AI-powered insight engine that performs market analysis, competitor intelligence,
+                and related research based on user-defined queries and parameters. The Service autonomously gathers,
+                synthesizes, and analyzes data from various sources to generate reports ("Reports") intended to provide
+                strategic insights. The specific scope, depth, and turnaround time depend on the service tier selected
+                (<a href="/pricing">see Pricing</a>).</p>
+            <p>The Service is provided on an "AS IS" and "AS AVAILABLE" basis. We are constantly evolving the Service,
+                and its form and nature may change without prior notice to you.</p>
+
+            <h2>3. User Accounts</h2>
+            <p>To access certain features, you may need to register for an account. You agree to provide accurate,
+                current, and complete information during registration and keep your account information updated. You are
+                responsible for safeguarding your password and for all activities that occur under your account. You
+                agree to notify us immediately of any unauthorized use of your account.</p>
+
+            <h2>4. Use Restrictions</h2>
+            <p>You agree not to use the Service:</p>
+            <ul>
+                <li>In any way that violates any applicable federal, state, local, or international law or regulation.
+                </li>
+                <li>To engage in any conduct that restricts or inhibits anyone's use or enjoyment of the Service, or
+                    which, as determined by us, may harm Acumenis or users of the Service or expose them to liability.
+                </li>
+                <li>To attempt to gain unauthorized access to, interfere with, damage, or disrupt any parts of the
+                    Service, the server on which the Service is stored, or any server, computer, or database connected
+                    to the Service.</li>
+                <li>To reverse engineer, decompile, disassemble, or otherwise attempt to discover the source code,
+                    object code, or underlying structure, ideas, or algorithms of the Service.</li>
+                <li>To scrape, data mine, or extract data from the Service beyond the intended functionality (i.e.,
+                    receiving Reports).</li>
+                <li>To resell, sublicense, lease, or otherwise make the Service or Reports available to any third party,
+                    except as explicitly permitted for internal use within your organization.</li>
+            </ul>
+
+            <h2>5. Intellectual Property Rights</h2>
+            <p><strong>Our IP:</strong> The Service and its entire contents, features, and functionality (including but
+                not limited to all information, software, text, displays, images, video, and audio, and the design,
+                selection, and arrangement thereof) are owned by Acumenis, its licensors, or other providers of such
+                material and are protected by United States and international copyright, trademark, patent, trade
+                secret, and other intellectual property or proprietary rights laws.</p>
+            <p><strong>Your Input:</strong> You retain ownership of any data, information, or materials you provide to
+                the Service ("User Input"). However, you grant Acumenis a worldwide, non-exclusive, royalty-free,
+                sublicensable, and transferable license to use, reproduce, distribute, prepare derivative works of,
+                display, and perform the User Input solely in connection with operating, providing, and improving the
+                Service. We may use anonymized and aggregated User Input and usage data to improve our AI models and
+                services.</p>
+            <p><strong>Reports:</strong> Subject to your compliance with these Terms and payment of applicable fees,
+                Acumenis grants you a limited, non-exclusive, non-transferable, non-sublicensable license to use the
+                Reports generated specifically for you for your internal business purposes only. You may not publicly
+                distribute, resell, or create derivative commercial products based on the Reports without our express
+                written permission.</p>
+
+            <h2>6. Fees and Payment</h2>
+            <p>Access to certain features or tiers of the Service requires payment of fees as detailed on our Pricing
+                page (<a href="/pricing">/pricing</a>) or Order form. You agree to pay all applicable fees. All fees are
+                non-refundable except as required by law or as explicitly stated otherwise by us. We reserve the right
+                to change our fees or billing methods at any time.</p>
+
+            <h2>7. Disclaimers</h2>
+            <p><strong>NO WARRANTIES:</strong> THE SERVICE AND REPORTS ARE PROVIDED "AS IS" AND "AS AVAILABLE" WITHOUT
+                ANY WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED, INCLUDING, BUT NOT LIMITED TO, IMPLIED WARRANTIES
+                OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, TITLE, OR NON-INFRINGEMENT.</p>
+            <p><strong>AI OUTPUT:</strong> ACUMENIS USES COMPLEX AI SYSTEMS. WHILE WE STRIVE FOR ACCURACY AND DEPTH, WE
+                DO NOT WARRANT THAT THE SERVICE OR REPORTS WILL BE ERROR-FREE, UNINTERRUPTED, ACCURATE, COMPLETE,
+                RELIABLE, CURRENT, OR FREE OF VIRUSES OR OTHER HARMFUL COMPONENTS. THE OUTPUT IS GENERATED BASED ON DATA
+                AVAILABLE AT THE TIME OF ANALYSIS, WHICH MAY BE INCOMPLETE OR OUTDATED. AI-GENERATED CONTENT MAY CONTAIN
+                INACCURACIES OR MISREPRESENTATIONS.</p>
+            <p><strong>NO PROFESSIONAL ADVICE:</strong> THE REPORTS AND INFORMATION PROVIDED BY THE SERVICE ARE FOR
+                INFORMATIONAL PURPOSES ONLY AND DO NOT CONSTITUTE FINANCIAL, LEGAL, INVESTMENT, BUSINESS, OR ANY OTHER
+                TYPE OF PROFESSIONAL ADVICE. YOU SHOULD CONSULT WITH QUALIFIED PROFESSIONALS BEFORE MAKING ANY STRATEGIC
+                DECISIONS BASED ON THE REPORTS. YOUR USE OF THE SERVICE AND RELIANCE ON ANY INFORMATION PROVIDED IS
+                SOLELY AT YOUR OWN RISK.</p>
+
+            <h2>8. Limitation of Liability</h2>
+            <p>TO THE FULLEST EXTENT PERMITTED BY APPLICABLE LAW, IN NO EVENT SHALL ACUMENIS, ITS AFFILIATES, DIRECTORS,
+                OFFICERS, EMPLOYEES, AGENTS, SUPPLIERS, OR LICENSORS BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL,
+                CONSEQUENTIAL, PUNITIVE, OR EXEMPLARY DAMAGES, INCLUDING BUT NOT LIMITED TO, DAMAGES FOR LOSS OF
+                PROFITS, GOODWILL, USE, DATA, OR OTHER INTANGIBLE LOSSES (EVEN IF ACUMENIS HAS BEEN ADVISED OF THE
+                POSSIBILITY OF SUCH DAMAGES), ARISING OUT OF OR RELATING TO YOUR ACCESS TO OR USE OF, OR YOUR INABILITY
+                TO ACCESS OR USE, THE SERVICE OR ANY REPORTS.</p>
+            <p>TO THE FULLEST EXTENT PERMITTED BY LAW, ACUMENIS'S TOTAL CUMULATIVE LIABILITY TO YOU FOR ALL CLAIMS
+                ARISING FROM OR RELATING TO THE SERVICE OR THESE TERMS, WHETHER IN CONTRACT, TORT, OR OTHERWISE, SHALL
+                NOT EXCEED THE GREATER OF (A) THE TOTAL AMOUNT OF FEES PAID BY YOU TO ACUMENIS FOR THE SERVICE IN THE
+                SIX (6) MONTHS IMMEDIATELY PRECEDING THE EVENT GIVING RISE TO THE CLAIM, OR (B) ONE HUNDRED U.S. DOLLARS
+                ($100.00).</p>
+
+            <h2>9. Indemnification</h2>
+            <p>You agree to defend, indemnify, and hold harmless Acumenis, its affiliates, licensors, and service
+                providers, and its and their respective officers, directors, employees, contractors, agents, licensors,
+                suppliers, successors, and assigns from and against any claims, liabilities, damages, judgments, awards,
+                losses, costs, expenses, or fees (including reasonable attorneys' fees) arising out of or relating to
+                your violation of these Terms or your use of the Service, including, but not limited to, your User
+                Input, any use of the Service's content, services, and products other than as expressly authorized in
+                these Terms, or your use of any information obtained from the Service.</p>
+
+            <h2>10. Termination</h2>
+            <p>We may terminate or suspend your access to all or part of the Service, without prior notice or liability,
+                for any reason whatsoever, including without limitation if you breach these Terms. Upon termination,
+                your right to use the Service will immediately cease. Provisions of these Terms that by their nature
+                should survive termination shall survive termination, including, without limitation, ownership
+                provisions, warranty disclaimers, indemnity, and limitations of liability.</p>
+
+            <h2>11. Governing Law and Dispute Resolution</h2>
+            <p>These Terms shall be governed by and construed in accordance with the laws of the State of [Your
+                State/Jurisdiction - e.g., Delaware], without regard to its conflict of law principles.</p>
+            <p>Any dispute arising from or relating to the subject matter of these Terms shall be finally settled by
+                binding arbitration in [Your City, Your State - e.g., Wilmington, Delaware], using the English language
+                in accordance with the Arbitration Rules and Procedures of JAMS then in effect, by one commercial
+                arbitrator with substantial experience in resolving intellectual property and commercial contract
+                disputes. Judgment upon the award rendered by such arbitrator may be entered in any court of competent
+                jurisdiction. Notwithstanding the foregoing obligation to arbitrate disputes, each party shall have the
+                right to pursue injunctive or other equitable relief at any time, from any court of competent
+                jurisdiction.</p>
+            <p><strong>YOU AND ACUMENIS AGREE THAT EACH MAY BRING CLAIMS AGAINST THE OTHER ONLY IN YOUR OR ITS
+                    INDIVIDUAL CAPACITY, AND NOT AS A PLAINTIFF OR CLASS MEMBER IN ANY PURPORTED CLASS OR REPRESENTATIVE
+                    PROCEEDING.</strong></p>
+
+            <h2>12. Changes to Terms</h2>
+            <p>We reserve the right, at our sole discretion, to modify or replace these Terms at any time. If a revision
+                is material, we will provide reasonable notice prior to any new terms taking effect, such as by posting
+                on our website or sending an email. What constitutes a material change will be determined at our sole
+                discretion. By continuing to access or use our Service after any revisions become effective, you agree
+                to be bound by the revised terms.</p>
+
+            <h2>13. Miscellaneous</h2>
+            <p>These Terms constitute the entire agreement between you and Acumenis regarding the Service and supersede
+                all prior agreements. If any provision of these Terms is held to be invalid or unenforceable, that
+                provision will be limited or eliminated to the minimum extent necessary, and the remaining provisions
+                will remain in full force and effect. No waiver of any term shall be deemed a further or continuing
+                waiver of such term or any other term. Our failure to assert any right or provision under these Terms
+                shall not constitute a waiver of such right or provision.</p>
+
+            <h2>14. Contact Information</h2>
+            <p>If you have any questions about these Terms, please contact us at: [Your Contact Email or Link to Contact
+                Form]</p>
+
+        </div>
+
+        <footer>
+            <div class="container">
+                <p>© <span id="year"></span> Acumenis // AI Insight Engine.</p>
+                <p><a href="/">Home</a> | <a href="/pricing">Tiers</a> | <a href="/privacy">Privacy Policy</a> | <a
+                        href="/tos">Terms of Service</a></p>
+            </div>
+        </footer>
+
+        <script>
+            document.getElementById('year').textContent = new Date().getFullYear();
+        </script>
+    </div>
+</body>
+
+</html>
