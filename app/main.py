@@ -41,15 +41,50 @@ STATIC_DIR = "/app/static_website" # Served from container root
 os.makedirs(STATIC_DIR, exist_ok=True)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static_assets")
 
-# --- Serve the Main Acumenis Interface Template at Root ---
-@app.get("/", response_class=HTMLResponse, include_in_schema=False)
-async def serve_acumenis_interface(request: Request):
-    """Serves the main single-page application interface."""
-    template_path = os.path.join(templates_dir, "acumenis_interface.html")
-    if not os.path.exists(template_path):
-         return HTMLResponse("<html><body><h1>Error 500</h1><p>Interface template not found.</p></body></html>", status_code=500)
-    # Pass settings or other dynamic data to the template if needed
-    return templates.TemplateResponse("acumenis_interface.html", {"request": request, "settings": settings})
+# --- Serve Static HTML Pages ---
+# Serve index.html at the root
+@app.get("/", response_class=FileResponse, include_in_schema=False)
+async def serve_index():
+    path = os.path.join(STATIC_DIR, "index.html")
+    if not os.path.exists(path): raise HTTPException(status_code=404, detail="index.html not found")
+    return FileResponse(path)
+
+# Serve other HTML pages
+@app.get("/pricing", response_class=FileResponse, include_in_schema=False)
+async def serve_pricing():
+    path = os.path.join(STATIC_DIR, "pricing.html")
+    if not os.path.exists(path): raise HTTPException(status_code=404, detail="pricing.html not found")
+    return FileResponse(path)
+
+@app.get("/order", response_class=FileResponse, include_in_schema=False)
+async def serve_order():
+    path = os.path.join(STATIC_DIR, "order.html")
+    if not os.path.exists(path): raise HTTPException(status_code=404, detail="order.html not found")
+    return FileResponse(path)
+
+@app.get("/privacy", response_class=FileResponse, include_in_schema=False)
+async def serve_privacy():
+    path = os.path.join(STATIC_DIR, "privacy.html")
+    if not os.path.exists(path): raise HTTPException(status_code=404, detail="privacy.html not found")
+    return FileResponse(path)
+
+@app.get("/terms", response_class=FileResponse, include_in_schema=False)
+async def serve_terms():
+    # Assuming terms of service file is named tos.html based on open tabs
+    path = os.path.join(STATIC_DIR, "tos.html")
+    if not os.path.exists(path): raise HTTPException(status_code=404, detail="tos.html not found")
+    return FileResponse(path)
+
+# Serve order success page (if needed by redirect_url)
+@app.get("/order-success", response_class=FileResponse, include_in_schema=False)
+async def serve_order_success():
+    # Create a simple success page or use index/order page?
+    # For now, serve index if a dedicated success page doesn't exist
+    path = os.path.join(STATIC_DIR, "order_success.html") # Assumes this file exists
+    if not os.path.exists(path):
+        path = os.path.join(STATIC_DIR, "index.html") # Fallback to index
+        if not os.path.exists(path): raise HTTPException(status_code=404, detail="Fallback index.html not found")
+    return FileResponse(path)
 
 # --- Control Panel UI Endpoint ---
 @app.get("/ui", response_class=HTMLResponse, tags=["Control UI"])
@@ -84,6 +119,9 @@ async def start_worker(worker_name: str):
         elif worker_name == "mcol":
             from Acumenis.app.workers.run_mcol_worker import run_mcol_worker
             task = asyncio.create_task(run_mcol_worker(shutdown_event), name=f"worker_{worker_name}")
+        elif worker_name == "key_acquirer":
+            from Acumenis.app.workers.run_key_acquirer_worker import run_key_acquirer_worker
+            task = asyncio.create_task(run_key_acquirer_worker(shutdown_event), name=f"worker_{worker_name}")
         else:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Worker '{worker_name}' not found.")
 

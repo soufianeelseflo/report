@@ -120,3 +120,19 @@ class McolDecisionLog(Base):
 # Relationship (optional but good practice)
 KpiSnapshot.mcol_decisions = relationship("McolDecisionLog", backref="triggering_snapshot", foreign_keys=[McolDecisionLog.kpi_snapshot_id])
 KpiSnapshot.mcol_followups = relationship("McolDecisionLog", backref="followup_snapshot", foreign_keys=[McolDecisionLog.follow_up_kpi_snapshot_id])
+
+class ApiKey(Base):
+    """Stores API keys acquired or managed by the system."""
+    __tablename__ = 'api_keys'
+
+    id = Column(Integer, primary_key=True, index=True)
+    # Store the API key encrypted using functions from core.security
+    api_key_encrypted = Column(Text, nullable=False)
+    provider = Column(String(100), nullable=False, index=True) # e.g., "openrouter", "openai"
+    email_used = Column(String(255), nullable=True) # Temp email used for acquisition
+    proxy_used = Column(String(255), nullable=True) # Proxy used for acquisition
+    status = Column(String(50), nullable=False, default='active', index=True) # active, inactive, banned, error
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    last_used_at = Column(DateTime(timezone=True), nullable=True)
+    # Optional: Add notes field for errors during acquisition or usage issues
+    notes = Column(Text, nullable=True)

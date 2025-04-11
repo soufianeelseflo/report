@@ -10,7 +10,8 @@ from sqlalchemy import func, cast, Float, Integer as SQLInteger, text
 from . import models
 from autonomous_agency.app.api import schemas # Assuming schemas is here
 from autonomous_agency.app.core.config import settings # Import settings for variant IDs
-from .models import KpiSnapshot, McolDecisionLog, ReportRequest, Prospect, EmailAccount
+from autonomous_agency.app.core.security import encrypt_data, decrypt_data # Import encryption functions
+from .models import KpiSnapshot, McolDecisionLog, ReportRequest, Prospect, EmailAccount, ApiKey # Import ApiKey model
 
 async def create_report_request(db: AsyncSession, request: schemas.ReportRequestCreate) -> models.ReportRequest:
     """DEPRECATED? Creates a report request directly via API, bypassing payment initially."""
@@ -237,6 +238,45 @@ async def set_email_account_inactive(db: AsyncSession, account_id: int, reason: 
         }
     )
 
+async def get_batch_of_active_accounts(db: AsyncSession, limit: int) -> List[models.EmailAccount]:
+    """
+    Finds a batch of active email accounts under their daily limit,
+    ordered by least recently used. Handles daily reset logic.
+    """
+    today = datetime.date.today()
+    # Step 1: Identify accounts needing reset
+    reset_candidates_result = await db.execute(
+        select(models.EmailAccount.account_id)
+        .where(models.EmailAccount.is_active == True)
+        .where(models.EmailAccount.last_reset_date < today)
+    )
+    accounts_to_reset_ids = reset_candidates_result.scalars().all()
+
+    # Step 2: Reset counts for those accounts if any
+    if accounts_to_reset_ids:
+        await db.execute(
+            text(
+                "UPDATE email_accounts "
+                "SET emails_sent_today = 0, last_reset_date = :today "
+                "WHERE account_id = ANY(:account_ids)"
+            ),
+            {"today": today, "account_ids": accounts_to_reset_ids}
+        )
+        print(f"[EmailAccountCRUD] Reset daily counts for {len(accounts_to_reset_ids)} accounts.")
+        # No commit here, part of the overall transaction
+
+    # Step 3: Fetch usable accounts (active and under limit after potential reset)
+    result = await db.execute(
+        select(models.EmailAccount)
+        .where(models.EmailAccount.is_active == True)
+        .where(models.EmailAccount.emails_sent_today < models.EmailAccount.daily_limit)
+        .order_by(models.EmailAccount.last_used_at.asc().nullsfirst())
+        .limit(limit)
+        .with_for_update(skip_locked=True) # Lock selected rows for update
+    )
+    accounts = result.scalars().all()
+    return accounts
+
 # --- MCOL CRUD ---
 async def create_kpi_snapshot(db: AsyncSession) -> KpiSnapshot:
     """Calculates current KPIs and saves a snapshot."""
@@ -336,3 +376,131 @@ async def get_latest_kpi_snapshot(db: AsyncSession) -> Optional[KpiSnapshot]:
     """Retrieves the most recent KPI snapshot."""
     result = await db.execute(select(KpiSnapshot).order_by(KpiSnapshot.timestamp.desc()).limit(1))
     return result.scalars().first()
+
+# --- API Key CRUD ---
+
+async def add_api_key(db: AsyncSession, key: str, provider: str, email: Optional[str] = None, proxy: Optional[str] = None, notes: Optional[str] = None) -> models.ApiKey:
+    """Adds a new API key, storing it encrypted."""
+    encrypted_key = encrypt_data(key)
+    if not encrypted_key:
+        # Handle encryption failure, maybe raise an error or log
+        print(f"Error: Failed to encrypt API key for provider {provider}")
+        raise ValueError("Encryption failed") # Or return None / handle differently
+
+    # Optional: Check if the encrypted key already exists for this provider to avoid duplicates
+    # existing = await db.scalar(select(models.ApiKey).where(models.ApiKey.api_key_encrypted == encrypted_key, models.ApiKey.provider == provider))
+    # if existing:
+    #     print(f"API Key for provider {provider} already exists (ID: {existing.id}). Skipping.")
+    #     return existing # Or update status/notes?
+
+    db_key = models.ApiKey(
+        api_key_encrypted=encrypted_key,
+        provider=provider,
+        email_used=email,
+        proxy_used=proxy,
+        status="active",
+        notes=notes
+    )
+    db.add(db_key)
+    await db.flush()
+    await db.refresh(db_key)
+    print(f"Added new API Key ID {db_key.id} for provider {provider}")
+    return db_key
+
+async def get_active_api_keys(db: AsyncSession, provider: str) -> List[str]:
+    """Retrieves all active, decrypted API keys for a given provider."""
+    result = await db.execute(
+        select(models.ApiKey.api_key_encrypted, models.ApiKey.id) # Fetch ID for logging
+        .where(models.ApiKey.provider == provider)
+        .where(models.ApiKey.status == 'active')
+    )
+    encrypted_keys_with_ids = result.all() # Fetch (encrypted_key, id) tuples
+
+    decrypted_keys = []
+    for enc_key, key_id in encrypted_keys_with_ids:
+        dec_key = decrypt_data(enc_key)
+        if dec_key: # Check if decryption was successful
+            decrypted_keys.append(dec_key)
+        else:
+            # Log or handle decryption failure for this specific key
+            print(f"Warning: Failed to decrypt API key ID {key_id} for provider {provider}.")
+            # Optionally try to mark the key as error?
+            # asyncio.create_task(set_api_key_status(db, key_id=key_id, status='error', reason='Decryption failed')) # Needs key_id based update function
+
+    return decrypted_keys
+
+async def set_api_key_status_by_value(db: AsyncSession, key_value: str, provider: str, status: str, reason: Optional[str] = None) -> bool:
+    """
+    Finds an API key by its DECRYPTED value and provider, then updates its status.
+    Note: This requires fetching and decrypting keys until a match is found, which can be inefficient.
+    Consider adding a function to update by ID if the ID is known.
+    """
+    result = await db.execute(
+        select(models.ApiKey)
+        .where(models.ApiKey.provider == provider)
+        # Fetch potentially matching keys (active or otherwise, depending on use case)
+        # .where(models.ApiKey.status == 'active') # Only search active keys? Or any key?
+    )
+    potential_keys = result.scalars().all()
+
+    target_key_id = None
+    target_key_id = None
+    for db_key in potential_keys:
+        decrypted_key = decrypt_data(db_key.api_key_encrypted)
+        if decrypted_key == key_value:
+            target_key_id = db_key.id
+            break # Found the key
+
+    if target_key_id:
+        db_key_to_update = await db.get(models.ApiKey, target_key_id)
+        if db_key_to_update:
+            db_key_to_update.status = status
+            if reason:
+                db_key_to_update.notes = f"[{status.upper()} at {datetime.datetime.now(datetime.timezone.utc)}] {reason}\n{db_key_to_update.notes or ''}".strip()
+            db_key_to_update.updated_at = datetime.datetime.now(datetime.timezone.utc) # Assuming updated_at exists or add it
+            await db.flush()
+            print(f"Updated status for API Key ID {target_key_id} (Provider: {provider}) to '{status}'")
+            return True
+        else:
+             print(f"Error: Found key ID {target_key_id} but failed to retrieve for update.")
+             return False # Should not happen if ID was just found
+    else:
+        print(f"API Key matching '{key_value[:5]}...' for provider '{provider}' not found for status update.")
+        return False
+
+async def set_api_key_inactive(db: AsyncSession, key_to_deactivate: str, provider: str, reason: str) -> bool:
+     """Convenience function to mark a key as inactive."""
+     # Use the renamed function that searches by decrypted value
+     return await set_api_key_status_by_value(db, key_value=key_to_deactivate, provider=provider, status='inactive', reason=reason)
+
+async def mark_api_key_used(db: AsyncSession, key_value: str, provider: str) -> bool:
+    """Updates the last_used_at timestamp for a given API key."""
+    # Similar logic to set_api_key_status to find the key ID first
+    result = await db.execute(
+        select(models.ApiKey)
+        .where(models.ApiKey.provider == provider)
+        .where(models.ApiKey.status == 'active') # Only mark active keys as used
+    )
+    active_keys = result.scalars().all()
+
+    target_key_id = None
+    for db_key in active_keys:
+        decrypted_key = decrypt_data(db_key.api_key_encrypted)
+        if decrypted_key == key_value:
+            target_key_id = db_key.id
+            break
+
+    if target_key_id:
+        db_key_to_update = await db.get(models.ApiKey, target_key_id)
+        if db_key_to_update:
+            db_key_to_update.last_used_at = datetime.datetime.now(datetime.timezone.utc)
+            await db.flush()
+            # print(f"Updated last_used_at for API Key ID {target_key_id}") # Optional: reduce log noise
+            return True
+        else:
+            print(f"Error: Found key ID {target_key_id} but failed to retrieve for last_used_at update.")
+            return False
+    else:
+        # This might happen if the key was already inactive but still in the rotation list temporarily
+        print(f"Warning: Active API Key matching '{key_value[:5]}...' for provider '{provider}' not found for last_used_at update.")
+        return False

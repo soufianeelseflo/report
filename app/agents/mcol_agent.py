@@ -205,16 +205,39 @@ async def implement_strategy(client: httpx.AsyncClient, strategy: Dict[str, str]
                 Generate the HTML content for the BODY of the Acumenis order page (`order.html`).
                 Include:
                 1. Headline: "Order Your Custom AI Research Report". Sub-headline: "Get started in minutes. Fill out your requirements below and proceed to secure checkout via Lemon Squeezy."
-                2. Order Form (id="report-order-form"): Fields: Name (text, required), Email (email, required), Company Name (text, optional, id="company_name"), Report Type (select, id="report_type", options: value="standard_499" text="Standard Report ($499)", value="premium_999" text="Premium Deep Dive ($999)"), Research Topic/Details (textarea, required, id="request_details", placeholder="Be specific..."). Submit Button (id="submit-order-btn", text="Proceed to Secure Payment"). Message Div (id="form-message").
+                2. Order Form (id="report-order-form"):
+                   - Fields:
+                       - Name (input type="text", id="client_name", name="client_name", required)
+                       - Email (input type="email", id="client_email", name="client_email", required)
+                       - Company Name (input type="text", id="company_name", name="company_name")
+                       - Report Type (select id="report_type", name="report_type", required): Options: value="standard_499" text="Standard Report ($499)", value="premium_999" text="Premium Deep Dive ($999)"
+                       - Research Topic/Details (textarea id="request_details", name="request_details", required, placeholder="Be specific about the company, market, topic, or questions you want researched...")
+                   - Submit Button (button type="submit", id="submit-order-btn"): Text "Proceed to Secure Payment".
+                   - Message Div (div id="form-message"): Initially hidden, used for success/error/processing messages.
                 3. Trust Badges/Signals section below form: Include icons/text for "Secure Payment via Lemon Squeezy", "Confidentiality Assured", "Fast Turnaround".
-                4. JavaScript (within `<script>` tags at the end):
-                   - Get plan from URL query parameter `?plan=` (if present) and pre-select the #report_type dropdown.
-                   - Add 'submit' event listener to #report-order-form.
-                   - On submit: Prevent default, show processing message, disable button. Get form values.
-                   - POST JSON data (`report_type`, `client_email`, `client_name`, `company_name`, `request_details`) to `/api/v1/payments/create-checkout`.
-                   - On success (201): Get `checkout_url` from response, redirect (`window.location.href = checkout_url`).
-                   - On error: Show error message, re-enable button.
-                Ensure content is clear and focused on completing the order.
+                4. JavaScript (within `<script>` tags at the end of the body content):
+                   - Function to get plan from URL query parameter `?plan=` and pre-select the #report_type dropdown on page load.
+                   - Add 'submit' event listener to the form (#report-order-form).
+                   - Inside the listener:
+                       - Prevent default form submission (`event.preventDefault()`).
+                       - Get references to form elements (button, message div).
+                       - Clear previous messages, show "Processing..." message, disable button.
+                       - Get form values: `report_type`, `client_email`, `client_name`, `company_name`, `request_details`.
+                       - Basic Validation: Check if required fields (email, name, details) are filled. If not, show error message, enable button, return.
+                       - Construct JSON payload: `{{"report_type": reportType, "client_email": email, "client_name": name, "company_name": companyName, "request_details": details}}`.
+                       - Use `fetch` to send a POST request to `/api/v1/payments/create-checkout` with the JSON payload and appropriate headers (`'Content-Type': 'application/json'`).
+                       - Use `async/await` with `try/catch` for the fetch call.
+                       - Inside `try`:
+                           - Check `response.ok`. If true and `response.status === 201`:
+                               - Parse JSON response (`await response.json()`).
+                               - Get `checkout_url`.
+                               - Redirect: `window.location.href = checkout_url;`.
+                           - Else (other non-201 success or non-ok response):
+                               - Try to parse error message from response JSON (`await response.json()`), fallback to `response.statusText`.
+                               - Show error message in #form-message, enable button.
+                       - Inside `catch` (network error):
+                           - Show generic network error message in #form-message, enable button.
+                Ensure content is clear and focused on completing the order. Use the provided CSS classes for styling form elements and messages.
                 Output ONLY the HTML content for the `<main>` or central content area AND the `<script>` tag content, excluding `<html>`, `<head>`, `<body>`, header, and footer.
                 """
 
