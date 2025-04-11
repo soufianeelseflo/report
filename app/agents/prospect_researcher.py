@@ -18,7 +18,8 @@ from Acumenis.app.agents.agent_utils import get_httpx_client, call_llm_api # Imp
 # Removed SIGNAL_SOURCES as NewsAPI is deprecated
 
 MAX_PROSPECTS_PER_CYCLE = 20 # Limit prospects generated per run
-SIGNAL_ANALYSIS_TIMEOUT = 60 # Seconds to wait for LLM inference
+# SIGNAL_ANALYSIS_TIMEOUT = 60 # Seconds to wait for LLM inference (Now handled by call_llm_api timeout)
+OPEN_DEEP_RESEARCH_TIMEOUT = 300 # Seconds timeout for the external tool
 
 # Use tenacity for retrying API calls
 RETRY_WAIT = wait_fixed(3)
@@ -105,113 +106,170 @@ async def find_contact_llm_guess(client: httpx.AsyncClient, company_name: str, w
     # return f"info@{domain}" # Optionally return a default guess
     return None
 
-
-async def process_llm_brainstorm_signals(client: httpx.AsyncClient, db: AsyncSession) -> int:
-    """Generates prospect ideas using LLM brainstorming."""
-    added_count = 0
-    print("[ProspectResearcher] Starting LLM brainstorming for prospects...")
-
-    # Define criteria for LLM brainstorming
-    # TODO: Make these criteria dynamic or configurable
-    criteria = "B2B SaaS companies in the marketing technology (MarTech) or sales technology space that have announced Series A or Series B funding rounds in the last 6-12 months."
-    prompt = f"""
-    List 15 distinct company names that fit the following criteria: {criteria}.
-    Focus on companies likely to benefit from competitive analysis or market research reports.
-    Format the output as a simple JSON list of strings, like: ["Company A Inc.", "Company B Solutions", "Company C Tech"].
-    Output ONLY the JSON list.
+async def run_opendeepresearch_query(query: str) -> Optional[List[Dict]]:
     """
+    Runs the open-deep-research tool as a subprocess with a given query.
+    Parses the JSON output file.
+    """
+    print(f"[ProspectResearcher] Running open-deep-research for query: '{query[:50]}...'")
+    results = None
+    output_filename = f"research_output_{random.randint(1000, 9999)}.json"
+    # Assume output is saved relative to the tool's repo path for simplicity
+    output_path = os.path.join(settings.OPEN_DEEP_RESEARCH_REPO_PATH, output_filename)
 
-    # Use shared call_llm_api from agent_utils
-    llm_response = await call_llm_api(client, prompt, model=settings.STANDARD_REPORT_MODEL or "google/gemini-1.5-flash-latest")
+    # Construct command
+    node_script_path = os.path.join(settings.OPEN_DEEP_RESEARCH_REPO_PATH, settings.OPEN_DEEP_RESEARCH_ENTRY_POINT)
+    if not os.path.exists(settings.NODE_EXECUTABLE_PATH):
+        print(f"Error: Node executable not found at: {settings.NODE_EXECUTABLE_PATH}")
+        return None
+    if not os.path.exists(node_script_path):
+        print(f"Error: open-deep-research entry point not found at: {node_script_path}")
+        return None
 
-    company_names = []
-    if llm_response:
-        if isinstance(llm_response, list):
-            company_names = [name for name in llm_response if isinstance(name, str)]
-        elif isinstance(llm_response.get("raw_inference"), str):
-             # Try parsing raw inference if LLM didn't return clean JSON list
-             try:
-                 raw_list = json.loads(llm_response["raw_inference"])
-                 if isinstance(raw_list, list):
-                     company_names = [name for name in raw_list if isinstance(name, str)]
-             except json.JSONDecodeError:
-                 # Fallback: Try regex to extract names if JSON fails (less reliable)
-                 print("[ProspectResearcher] LLM brainstorm response not valid JSON list, attempting regex extraction.")
-                 # Example regex (adjust as needed): find quoted strings or lines starting with '-'
-                 potential_names = re.findall(r'["\']([^"\']+)["\']|^- (.*)', llm_response["raw_inference"], re.MULTILINE)
-                 company_names = [match[0] or match[1] for match in potential_names if match[0] or match[1]]
+    cmd = [
+        settings.NODE_EXECUTABLE_PATH,
+        node_script_path,
+        "--query", query,
+        "--output", output_path, # Assuming the tool saves JSON to this path
+        "--json", # Assuming a flag for JSON output
+        # Add other relevant flags like --depth if needed
+        # "--depth", "3",
+    ]
 
-    if not company_names:
-        print("[ProspectResearcher] LLM brainstorming did not yield company names.")
-        return 0
+    try:
+        print(f"[ProspectResearcher] Executing: {' '.join(cmd)}")
+        process = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            cwd=settings.OPEN_DEEP_RESEARCH_REPO_PATH
+        )
 
-    print(f"[ProspectResearcher] LLM brainstormed {len(company_names)} potential companies.")
-
-    for company_name in company_names:
-        if added_count >= MAX_PROSPECTS_PER_CYCLE: break
-        if shutdown_event.is_set(): break # Check for shutdown signal
-
-        company_name = company_name.strip()
-        if not company_name: continue
-
-        print(f"[ProspectResearcher] Processing brainstormed company: {company_name}")
-
-        # Attempt to find website (simple heuristic or another LLM call)
-        # For now, we'll skip website finding to focus on email guessing if needed
-        website = None
-        # TODO: Implement website finding if needed for email guessing strategy
-
-        # Infer pain points
-        inferred_pain = await infer_pain_points_llm(client, company_name)
-
-        # Attempt to find contact email using LLM guessing
-        contact_email = await find_contact_llm_guess(client, company_name, website)
-
-        # Save prospect
         try:
-            created = await crud.create_prospect(
-                db=db,
-                company_name=company_name,
-                email=contact_email, # Might be None
-                website=website, # Might be None
-                pain_point=inferred_pain,
-                source="llm_brainstorm"
-            )
-            if created:
-                # Commit immediately after adding one prospect? Or batch commit?
-                # Committing here ensures data is saved even if subsequent steps fail.
-                await db.commit()
-                added_count += 1
-                print(f"[ProspectResearcher] Prospect '{created.company_name}' added from LLM brainstorm (ID: {created.prospect_id}). Total added: {added_count}")
-            else:
-                await db.rollback() # Duplicate or other issue during creation
-        except Exception as e:
-            print(f"[ProspectResearcher] Error saving prospect from LLM brainstorm ({company_name}) to DB: {e}")
-            await db.rollback()
+            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=OPEN_DEEP_RESEARCH_TIMEOUT)
+        except asyncio.TimeoutError:
+            print(f"[ProspectResearcher] open-deep-research timed out after {OPEN_DEEP_RESEARCH_TIMEOUT}s. Terminating.")
+            try:
+                process.terminate()
+                await asyncio.wait_for(process.wait(), timeout=5.0)
+            except Exception: process.kill() # Force kill if terminate fails
+            raise TimeoutError("open-deep-research subprocess timed out.")
 
-        await asyncio.sleep(random.uniform(0.5, 1.5)) # Small delay
+        stdout_decoded = stdout.decode(errors='ignore').strip() if stdout else ""
+        stderr_decoded = stderr.decode(errors='ignore').strip() if stderr else ""
+        print(f"[ProspectResearcher] open-deep-research exited with code: {process.returncode}")
+        if stdout_decoded: print(f"[ProspectResearcher] ODR STDOUT: {stdout_decoded[:500]}...")
+        if stderr_decoded: print(f"[ProspectResearcher] ODR STDERR: {stderr_decoded[:500]}...")
 
+        if process.returncode == 0 and os.path.exists(output_path):
+            try:
+                with open(output_path, 'r', encoding='utf-8') as f:
+                    results = json.load(f)
+                print(f"[ProspectResearcher] Successfully parsed results from {output_path}")
+                # Assuming results is a list of dictionaries, one per company/lead
+                if not isinstance(results, list):
+                     print(f"[ProspectResearcher] Warning: Expected list from JSON output, got {type(results)}. Trying to adapt.")
+                     # Attempt to adapt if it's a dict with a known key, otherwise fail
+                     if isinstance(results, dict) and 'results' in results and isinstance(results['results'], list):
+                          results = results['results']
+                     elif isinstance(results, dict) and 'companies' in results and isinstance(results['companies'], list):
+                          results = results['companies']
+                     else:
+                          results = None # Cannot adapt
+            except json.JSONDecodeError as e:
+                print(f"[ProspectResearcher] Error decoding JSON from {output_path}: {e}")
+            except Exception as e:
+                print(f"[ProspectResearcher] Error reading results file {output_path}: {e}")
+        else:
+            print(f"[ProspectResearcher] open-deep-research failed (Code: {process.returncode}) or output file missing ({output_path}).")
+
+    except TimeoutError as e:
+         print(f"[ProspectResearcher] TimeoutError: {e}")
+    except FileNotFoundError as e:
+         print(f"[ProspectResearcher] FileNotFoundError running open-deep-research: {e}")
+    except Exception as e:
+        print(f"[ProspectResearcher] Unexpected error running open-deep-research: {e}")
+    finally:
+        # Clean up the output file
+        if os.path.exists(output_path):
+            try:
+                os.remove(output_path)
+            except OSError as e:
+                print(f"[ProspectResearcher] Error removing output file {output_path}: {e}")
+
+    return results
+# Removed duplicate return statement
     return added_count
 
 
 async def run_prospecting_cycle(db: AsyncSession, shutdown_event: asyncio.Event):
     """
-    Runs a single cycle of prospecting using LLM brainstorming.
+    Runs a single cycle of prospecting using open-deep-research.
     """
     print("[ProspectResearcher] Starting prospecting cycle...")
     prospects_added_this_cycle = 0
-    client = await get_httpx_client() # Get shared client
+    client = await get_httpx_client() # For LLM enrichment
+
+    # Define research queries/strategies for open-deep-research
+    # TODO: Make these dynamic or configurable
+    research_queries = [
+        "List B2B SaaS companies in marketing technology that received Series A funding recently",
+        "Identify companies launching new AI-powered analytics products",
+        "Find e-commerce platforms expanding into international markets",
+    ]
 
     try:
-        # Use LLM Brainstorming as the primary source
-        if not shutdown_event.is_set():
-            added = await process_llm_brainstorm_signals(client, db)
-            prospects_added_this_cycle += added
-            if prospects_added_this_cycle >= MAX_PROSPECTS_PER_CYCLE:
-                print("[ProspectResearcher] Reached max prospects for this cycle via LLM Brainstorming.")
+        for query in research_queries:
+            if shutdown_event.is_set(): break
+            if prospects_added_this_cycle >= MAX_PROSPECTS_PER_CYCLE: break
 
-        # TODO: Add calls to other prospecting methods here if implemented
-        # (e.g., process_scraping_signals, process_api_signals)
+            research_results = await run_opendeepresearch_query(query)
+
+            if research_results:
+                print(f"[ProspectResearcher] Processing {len(research_results)} results from query: '{query[:50]}...'")
+                for result in research_results:
+                    if shutdown_event.is_set(): break
+                    if prospects_added_this_cycle >= MAX_PROSPECTS_PER_CYCLE: break
+
+                    # --- Adapt parsing based on actual open-deep-research output ---
+                    # Assuming output provides at least 'name' and potentially 'website', 'description'
+                    company_name = result.get("name") or result.get("company_name")
+                    website = result.get("website") or result.get("url")
+                    description = result.get("description") or result.get("summary") or result.get("signal")
+                    # --- End Adapt ---
+
+                    if not company_name: continue # Skip if no company name found
+
+                    company_name = company_name.strip()
+                    print(f"[ProspectResearcher] Processing lead: {company_name}")
+
+                    # Infer pain points
+                    inferred_pain = await infer_pain_points_llm(client, company_name, description)
+
+                    # Attempt to find contact email using LLM guessing
+                    contact_email = await find_contact_llm_guess(client, company_name, website)
+
+                    # Save prospect
+                    try:
+                        created = await crud.create_prospect(
+                            db=db,
+                            company_name=company_name,
+                            email=contact_email,
+                            website=website,
+                            pain_point=inferred_pain,
+                            source=f"odr_{query[:30]}" # Source indicates ODR query
+                        )
+                        if created:
+                            await db.commit()
+                            prospects_added_this_cycle += 1
+                            print(f"[ProspectResearcher] Prospect '{created.company_name}' added from ODR (ID: {created.prospect_id}). Total added: {prospects_added_this_cycle}")
+                        else:
+                            await db.rollback() # Duplicate or other issue
+                    except Exception as e:
+                        print(f"[ProspectResearcher] Error saving prospect from ODR ({company_name}) to DB: {e}")
+                        await db.rollback()
+
+                    await asyncio.sleep(random.uniform(0.5, 1.5)) # Small delay between processing results
 
     except Exception as e:
         print(f"[ProspectResearcher] Unexpected error during prospecting cycle: {e}")

@@ -11,7 +11,7 @@ from . import models
 from autonomous_agency.app.api import schemas # Assuming schemas is here
 from autonomous_agency.app.core.config import settings # Import settings for variant IDs
 from autonomous_agency.app.core.security import encrypt_data, decrypt_data # Import encryption functions
-from .models import KpiSnapshot, McolDecisionLog, ReportRequest, Prospect, EmailAccount, ApiKey # Import ApiKey model
+from .models import KpiSnapshot, McolDecisionLog, ReportRequest, Prospect, EmailAccount, ApiKey, AgentTask # Import AgentTask model
 
 async def create_report_request(db: AsyncSession, request: schemas.ReportRequestCreate) -> models.ReportRequest:
     """DEPRECATED? Creates a report request directly via API, bypassing payment initially."""
@@ -98,16 +98,70 @@ async def create_report_request_from_webhook(
     print(f"[Webhook] Created ReportRequest ID {db_request.request_id} from LS Order {ls_order_id}")
     return db_request
 
-async def get_pending_report_request(db: AsyncSession) -> Optional[models.ReportRequest]:
-    """Gets the oldest PENDING (paid, ready to process) report request."""
-    result = await db.execute(
-        select(models.ReportRequest)
-        .where(models.ReportRequest.status == 'PENDING')
-        .order_by(models.ReportRequest.created_at.asc())
-        .limit(1)
-        .with_for_update(skip_locked=True)
+async def create_initial_report_request(
+    db: AsyncSession,
+    order_data: dict # Parsed data from Lemon Squeezy webhook
+) -> Optional[models.ReportRequest]:
+    """
+    Creates a report request after successful payment via webhook with status AWAITING_GENERATION.
+    This is the first step before an AgentTask is created.
+    """
+    ls_order_id = order_data.get('id')
+    if not ls_order_id:
+        print("[Webhook] Error: Missing order ID in webhook data.")
+        return None
+
+    # Check if order already processed
+    existing = await db.scalar(select(models.ReportRequest).where(models.ReportRequest.lemonsqueezy_order_id == str(ls_order_id)))
+    if existing:
+        print(f"[Webhook] Order ID {ls_order_id} already processed for ReportRequest ID {existing.request_id}. Skipping.")
+        return None # Indicate duplicate or already processed
+
+    attributes = order_data.get('attributes', {})
+    customer_email = attributes.get('user_email')
+    customer_name = attributes.get('user_name')
+    variant_id = attributes.get('first_order_item', {}).get('variant_id')
+    order_total_cents = attributes.get('total', 0)
+
+    custom_data = attributes.get('custom_data', {})
+    request_details = custom_data.get('research_topic', 'Not Provided - Check Order Notes')
+    company_name_custom = custom_data.get('company_name')
+
+    if not customer_email:
+        print(f"[Webhook] Error: Missing customer email for order {ls_order_id}.")
+        # Consider creating a task for manual review? For now, skip.
+        return None
+
+    # Determine report type based on variant ID
+    report_type_code = 'unknown_paid'
+    if str(variant_id) == settings.LEMONSQUEEZY_VARIANT_STANDARD:
+        report_type_code = 'standard_499'
+    elif str(variant_id) == settings.LEMONSQUEEZY_VARIANT_PREMIUM:
+        report_type_code = 'premium_999'
+    else:
+        print(f"[Webhook] Warning: Order {ls_order_id} variant ID {variant_id} doesn't match configured standard/premium IDs.")
+        # Fallback based on price might be unreliable with discounts
+
+    db_request = models.ReportRequest(
+        client_name=customer_name,
+        client_email=customer_email,
+        company_name=company_name_custom,
+        report_type=report_type_code,
+        request_details=request_details,
+        status="AWAITING_GENERATION", # Initial status after payment
+        payment_status="paid",
+        lemonsqueezy_order_id=str(ls_order_id),
+        order_total_cents=order_total_cents
     )
-    return result.scalars().first()
+    db.add(db_request)
+    await db.flush() # Flush to get the ID assigned
+    await db.refresh(db_request)
+    print(f"[Webhook] Created initial ReportRequest ID {db_request.request_id} from LS Order {ls_order_id} with status AWAITING_GENERATION.")
+    return db_request
+
+# Removed get_pending_report_request as ReportGenerator is now task-driven
+# async def get_pending_report_request(db: AsyncSession) -> Optional[models.ReportRequest]:
+#    ... (old code) ...
 
 async def update_report_request_status(db: AsyncSession, request_id: int, status: str, output_path: Optional[str] = None, error_message: Optional[str] = None, payment_status: Optional[str] = None, checkout_id: Optional[str] = None) -> Optional[models.ReportRequest]:
     """Updates the status and potentially other fields of a report request."""
@@ -504,3 +558,75 @@ async def mark_api_key_used(db: AsyncSession, key_value: str, provider: str) -> 
         # This might happen if the key was already inactive but still in the rotation list temporarily
         print(f"Warning: Active API Key matching '{key_value[:5]}...' for provider '{provider}' not found for last_used_at update.")
         return False
+
+# --- Agent Task CRUD ---
+
+async def create_agent_task(
+    db: AsyncSession,
+    agent_name: str,
+    goal: str,
+    parameters: Optional[Dict] = None,
+    priority: int = 0,
+    depends_on_task_id: Optional[int] = None
+) -> models.AgentTask:
+    """Creates a new agent task."""
+    db_task = models.AgentTask(
+        agent_name=agent_name,
+        goal=goal,
+        parameters=parameters,
+        priority=priority,
+        status='PENDING',
+        depends_on_task_id=depends_on_task_id
+    )
+    db.add(db_task)
+    await db.flush()
+    await db.refresh(db_task)
+    print(f"Created AgentTask ID {db_task.task_id} for agent {agent_name} with goal: {goal}")
+    return db_task
+
+async def get_pending_tasks_for_agent(
+    db: AsyncSession,
+    agent_name: str,
+    limit: int = 10
+) -> List[models.AgentTask]:
+    """
+    Fetches pending tasks for a specific agent, ordered by priority (desc)
+    and then creation time (asc). Uses FOR UPDATE SKIP LOCKED.
+    """
+    # TODO: Add check for dependencies if depends_on_task_id is used more robustly
+    # e.g., only fetch tasks where depends_on_task_id is NULL or the dependent task status is COMPLETED.
+    result = await db.execute(
+        select(models.AgentTask)
+        .where(models.AgentTask.agent_name == agent_name)
+        .where(models.AgentTask.status == 'PENDING')
+        .order_by(models.AgentTask.priority.desc(), models.AgentTask.created_at.asc())
+        .limit(limit)
+        .with_for_update(skip_locked=True)
+    )
+    tasks = result.scalars().all()
+    return tasks
+
+async def update_task_status(
+    db: AsyncSession,
+    task_id: int,
+    status: str,
+    result: Optional[str] = None
+) -> Optional[models.AgentTask]:
+    """Updates a task's status and optional result message."""
+    db_task = await db.get(models.AgentTask, task_id) # Use db.get for primary key lookup
+    if db_task:
+        db_task.status = status
+        if result is not None: # Allow clearing the result
+            db_task.result = result
+        # updated_at is handled automatically by onupdate
+        await db.flush()
+        await db.refresh(db_task)
+        print(f"Updated AgentTask ID {task_id} to status {status}")
+    else:
+        print(f"Warning: AgentTask ID {task_id} not found for status update.")
+    return db_task
+
+async def get_task(db: AsyncSession, task_id: int) -> Optional[models.AgentTask]:
+     """Retrieves a specific task by ID."""
+     result = await db.execute(select(models.AgentTask).where(models.AgentTask.task_id == task_id))
+     return result.scalars().first()

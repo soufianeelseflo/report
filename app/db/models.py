@@ -128,7 +128,7 @@ class ApiKey(Base):
     id = Column(Integer, primary_key=True, index=True)
     # Store the API key encrypted using functions from core.security
     api_key_encrypted = Column(Text, nullable=False)
-    provider = Column(String(100), nullable=False, index=True) # e.g., "openrouter", "openai"
+    provider = Column(String(100), nullable=False, index=True, default='openrouter') # Default provider
     email_used = Column(String(255), nullable=True) # Temp email used for acquisition
     proxy_used = Column(String(255), nullable=True) # Proxy used for acquisition
     status = Column(String(50), nullable=False, default='active', index=True) # active, inactive, banned, error
@@ -136,3 +136,23 @@ class ApiKey(Base):
     last_used_at = Column(DateTime(timezone=True), nullable=True)
     # Optional: Add notes field for errors during acquisition or usage issues
     notes = Column(Text, nullable=True)
+    # Add updated_at for tracking changes like status updates
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+class AgentTask(Base):
+    """Stores tasks for agents to perform."""
+    __tablename__ = 'agent_tasks'
+
+    task_id = Column(Integer, primary_key=True, index=True)
+    agent_name = Column(String(100), nullable=False, index=True)
+    status = Column(String(50), nullable=False, default='PENDING', index=True) # PENDING, IN_PROGRESS, COMPLETED, FAILED, WAITING
+    priority = Column(Integer, default=0, nullable=False)
+    goal = Column(Text, nullable=False)
+    parameters = Column(JSON, nullable=True)
+    result = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    depends_on_task_id = Column(Integer, ForeignKey('agent_tasks.task_id'), nullable=True)
+
+    # Optional: Relationship for dependencies
+    # dependent_task = relationship("AgentTask", remote_side=[task_id], backref="prerequisites")

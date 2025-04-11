@@ -146,17 +146,31 @@ async def lemon_squeezy_webhook(
         if event_name == "order_created":
             if order_data and order_data.get("type") == "orders":
                 try:
-                    # Create report request using data from webhook payload
-                    report_request = await crud.create_report_request_from_webhook(db, order_data)
+                    # Step 1: Create the initial ReportRequest record with status AWAITING_GENERATION
+                    report_request = await crud.create_initial_report_request(db, order_data)
+
                     if report_request:
+                        # Step 2: Create an AgentTask for the ReportGenerator
+                        agent_task = await crud.create_agent_task(
+                            db=db,
+                            agent_name='ReportGenerator',
+                            goal='Generate Report',
+                            parameters={'report_request_id': report_request.request_id}
+                            # priority=0 # Default priority
+                        )
+                        # Commit both the ReportRequest and AgentTask in one transaction
                         await db.commit()
-                        print(f"Successfully processed order {order_data.get('id')} and created ReportRequest {report_request.request_id}")
+                        print(f"Successfully processed order {order_data.get('id')}, created ReportRequest {report_request.request_id}, and AgentTask {agent_task.task_id}")
                     else:
-                        await db.rollback() # Skipped (e.g., duplicate)
+                        # create_initial_report_request returned None (e.g., duplicate order)
+                        await db.rollback()
+                        print(f"Webhook for order {order_data.get('id')} skipped (likely duplicate).")
+
                 except Exception as e:
-                     print(f"Error processing 'order_created' webhook for order {order_data.get('id')}: {e}")
-                     await db.rollback()
-                     return {"message": "Webhook received but processing failed internally."} # Return 200 OK but log error
+                    print(f"Error processing 'order_created' webhook for order {order_data.get('id')}: {e}")
+                    await db.rollback() # Rollback any partial changes
+                    # Still return 200 OK to Lemon Squeezy unless it's a signature error
+                    return {"message": "Webhook received but processing failed internally."}
             else:
                  print(f"Ignoring {event_name} webhook - missing or invalid order data.")
         else:

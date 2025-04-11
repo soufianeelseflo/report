@@ -254,7 +254,7 @@ async def process_email_batch(db: AsyncSession, shutdown_event: asyncio.Event):
                          except IndexError:
                               print(f"[EmailMarketer] Error removing account from active list index {current_account_list_index}")
                               account_index = -1 # Reset index
-                # Prospect status remains NEW, will be retried later
+                    # Prospect status remains NEW, will be retried later
 
             except aiosmtplib.SMTPRecipientsRefused as bounce_err:
                 print(f"[EmailMarketer] Hard bounce for {prospect.contact_email}: {bounce_err}. Marking as BOUNCED.")

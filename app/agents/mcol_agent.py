@@ -131,203 +131,75 @@ async def implement_strategy(client: httpx.AsyncClient, strategy: Dict[str, str]
     strategy_name = strategy.get("name", "").lower()
 
     # --- Define Implementation Logic per Strategy ---
-    async def generate_multi_page_website():
-        """Generates index.html, pricing.html, order.html"""
-        print("[MCOL] Attempting to generate multi-page website files...")
-        files_to_generate = ["index.html", "pricing.html", "order.html"]
-        generated_files = []
-        errors = []
+    # Note: Website generation is removed as per instructions.
 
-        # Common elements for prompts
-        common_header = f"""<header><div class="container header-content"><a href="/" class="logo">Acumenis</a><nav class="nav-links"><a href="/">Home</a><a href="/pricing">Pricing</a><a href="/order">Order Now</a></nav></div></header>"""
-        common_footer = f"""<footer><div class="container"><p>© {datetime.datetime.now().year} Acumenis. All Rights Reserved.</p><p><a href="/pricing">Pricing</a> | <a href="/order">Order</a></p></div></footer>"""
-        common_css = """
-        <style>
-            :root { --primary-color: #2563eb; --secondary-color: #111827; --accent-color: #f59e0b; --light-bg: #f9fafb; --medium-grey: #d1d5db; --dark-grey: #4b5563; --text-color: #374151; --white: #ffffff; --success-bg: #dcfce7; --success-border: #86efac; --success-text: #166534; --error-bg: #fee2e2; --error-border: #fca5a5; --error-text: #991b1b; --info-bg: #e0f2fe; --info-border: #7dd3fc; --info-text: #075985; }
-            *, *::before, *::after { box-sizing: border-box; }
-            body { font-family: 'Inter', sans-serif; line-height: 1.7; margin: 0; padding: 0; background-color: var(--white); color: var(--text-color); font-size: 16px; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
-            .container { max-width: 1200px; margin: 0 auto; padding: 0 24px; }
-            header { background-color: var(--white); padding: 15px 0; border-bottom: 1px solid #e5e7eb; position: sticky; top: 0; z-index: 100; }
-            .header-content { display: flex; justify-content: space-between; align-items: center; }
-            .logo { font-size: 1.5em; font-weight: 700; color: var(--secondary-color); text-decoration: none; }
-            .nav-links a { color: var(--text-color); text-decoration: none; margin-left: 25px; font-weight: 600; transition: color 0.3s ease; }
-            .nav-links a:hover { color: var(--primary-color); }
-            section { padding: 80px 0; }
-            section h2 { text-align: center; font-size: 2.5em; font-weight: 700; color: var(--secondary-color); margin-bottom: 16px; }
-            section .section-subtitle { text-align: center; font-size: 1.15em; color: var(--dark-grey); max-width: 700px; margin: 0 auto 60px auto; }
-            .cta-button { background-color: var(--primary-color); color: var(--white); padding: 14px 28px; font-size: 1.05em; font-weight: 600; text-decoration: none; border-radius: 8px; transition: background-color 0.3s ease, transform 0.1s ease; display: inline-block; border: none; cursor: pointer; box-shadow: 0 4px 6px rgba(50, 50, 93, 0.11), 0 1px 3px rgba(0, 0, 0, 0.08); }
-            .cta-button:hover { background-color: #1d4ed8; transform: translateY(-2px); }
-            .cta-button:active { transform: translateY(0); }
-            footer { background-color: var(--secondary-color); color: #9ca3af; text-align: center; padding: 40px 0; margin-top: 60px; font-size: 0.9em; }
-            footer p { margin: 5px 0; } footer a { color: var(--medium-grey); text-decoration: none; } footer a:hover { color: var(--white); }
-            /* Add more shared styles here */
-            .form-group { margin-bottom: 25px; }
-            .form-group label { display: block; margin-bottom: 8px; font-weight: 600; color: var(--secondary-color); font-size: 0.95em; }
-            .form-group input[type="text"], .form-group input[type="email"], .form-group select, .form-group textarea { width: 100%; padding: 14px; border: 1px solid var(--medium-grey); border-radius: 6px; font-size: 1em; box-sizing: border-box; background-color: var(--white); color: var(--text-color); transition: border-color 0.3s ease; }
-            .form-group input:focus, .form-group select:focus, .form-group textarea:focus { border-color: var(--primary-color); outline: none; box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.3); }
-            .form-group textarea { min-height: 150px; resize: vertical; }
-            #form-message { margin-top: 20px; padding: 12px; border-radius: 6px; text-align: center; font-weight: 600; display: none; font-size: 0.95em; }
-            #form-message.success { background-color: var(--success-bg); color: var(--success-text); border: 1px solid var(--success-border); }
-            #form-message.error { background-color: var(--error-bg); color: var(--error-text); border: 1px solid var(--error-border); }
-            #form-message.info { background-color: var(--info-bg); color: var(--info-text); border: 1px solid var(--info-border); }
-            @media (max-width: 768px) { body { font-size: 15px; } h1 { font-size: 2.2em; } section h2 { font-size: 2em; } .nav-links { display: none; } }
-        </style>
-        """
-
-        for filename in files_to_generate:
-            page_specific_prompt = ""
-            if filename == "index.html":
-                page_specific_prompt = f"""
-                Generate the HTML content for the BODY of the Acumenis homepage (`index.html`).
-                Include:
-                1. Hero section: Headline "Unlock Market Dominance with AI-Powered Research", Sub-headline "Acumenis delivers deep competitor analysis & market intelligence reports in hours, giving you the strategic edge.", CTA button "Explore Our Reports" linking to /pricing.
-                2. How it Works section: 3 simple steps (Submit Request -> AI Analysis -> Receive Report). Use icons (💡, ⚙️, 📬).
-                3. Key Differentiators section: Grid highlighting Speed, AI Depth, Cost-Effectiveness, Customization.
-                4. Use Cases section: Target specific roles/needs (e.g., "For Product Managers: Validate market fit instantly.", "For VPs Marketing: Understand competitor messaging.", "For CEOs/Strategists: Identify growth opportunities.").
-                5. Pricing Teaser section: Briefly mention Standard ($499) and Premium ($999) with a button "View Detailed Pricing" linking to /pricing.
-                6. Testimonials section (with 3 realistic placeholders).
-                7. Final CTA section: Repeat headline variation and button linking to /order.
-                Ensure content is SEO-optimized for "AI research reports", "market analysis", "competitor intelligence", "Acumenis".
-                Output ONLY the HTML content for the `<main>` or central content area, excluding `<html>`, `<head>`, `<body>`, header, and footer.
-                """
-            elif filename == "pricing.html":
-                page_specific_prompt = f"""
-                Generate the HTML content for the BODY of the Acumenis pricing page (`pricing.html`).
-                Include:
-                1. Headline: "Transparent Pricing for Actionable AI Insights". Sub-headline: "Choose the report depth that matches your strategic needs. No hidden fees, just rapid results."
-                2. Detailed Pricing Table: Side-by-side comparison of "Standard Report" ($499, Anchor ~$1500) and "Premium Deep Dive" ($999, Anchor ~$3000). Use checkmarks (✓) to list features clearly for each (e.g., Turnaround Time, Analysis Depth, Recommendation Level, Data Export). Highlight Premium plan. Include "Order Now" buttons linking to `/order?plan=standard` and `/order?plan=premium`.
-                3. Frequently Asked Questions (FAQ) section: Include 3-4 relevant questions and concise answers (e.g., What kind of data sources?, How custom can requests be?, What's the refund policy?).
-                Ensure content is SEO-optimized for "AI report pricing", "Acumenis pricing", "market analysis cost".
-                Output ONLY the HTML content for the `<main>` or central content area, excluding `<html>`, `<head>`, `<body>`, header, and footer.
-                """
-            elif filename == "order.html":
-                page_specific_prompt = f"""
-                Generate the HTML content for the BODY of the Acumenis order page (`order.html`).
-                Include:
-                1. Headline: "Order Your Custom AI Research Report". Sub-headline: "Get started in minutes. Fill out your requirements below and proceed to secure checkout via Lemon Squeezy."
-                2. Order Form (id="report-order-form"):
-                   - Fields:
-                       - Name (input type="text", id="client_name", name="client_name", required)
-                       - Email (input type="email", id="client_email", name="client_email", required)
-                       - Company Name (input type="text", id="company_name", name="company_name")
-                       - Report Type (select id="report_type", name="report_type", required): Options: value="standard_499" text="Standard Report ($499)", value="premium_999" text="Premium Deep Dive ($999)"
-                       - Research Topic/Details (textarea id="request_details", name="request_details", required, placeholder="Be specific about the company, market, topic, or questions you want researched...")
-                   - Submit Button (button type="submit", id="submit-order-btn"): Text "Proceed to Secure Payment".
-                   - Message Div (div id="form-message"): Initially hidden, used for success/error/processing messages.
-                3. Trust Badges/Signals section below form: Include icons/text for "Secure Payment via Lemon Squeezy", "Confidentiality Assured", "Fast Turnaround".
-                4. JavaScript (within `<script>` tags at the end of the body content):
-                   - Function to get plan from URL query parameter `?plan=` and pre-select the #report_type dropdown on page load.
-                   - Add 'submit' event listener to the form (#report-order-form).
-                   - Inside the listener:
-                       - Prevent default form submission (`event.preventDefault()`).
-                       - Get references to form elements (button, message div).
-                       - Clear previous messages, show "Processing..." message, disable button.
-                       - Get form values: `report_type`, `client_email`, `client_name`, `company_name`, `request_details`.
-                       - Basic Validation: Check if required fields (email, name, details) are filled. If not, show error message, enable button, return.
-                       - Construct JSON payload: `{{"report_type": reportType, "client_email": email, "client_name": name, "company_name": companyName, "request_details": details}}`.
-                       - Use `fetch` to send a POST request to `/api/v1/payments/create-checkout` with the JSON payload and appropriate headers (`'Content-Type': 'application/json'`).
-                       - Use `async/await` with `try/catch` for the fetch call.
-                       - Inside `try`:
-                           - Check `response.ok`. If true and `response.status === 201`:
-                               - Parse JSON response (`await response.json()`).
-                               - Get `checkout_url`.
-                               - Redirect: `window.location.href = checkout_url;`.
-                           - Else (other non-201 success or non-ok response):
-                               - Try to parse error message from response JSON (`await response.json()`), fallback to `response.statusText`.
-                               - Show error message in #form-message, enable button.
-                       - Inside `catch` (network error):
-                           - Show generic network error message in #form-message, enable button.
-                Ensure content is clear and focused on completing the order. Use the provided CSS classes for styling form elements and messages.
-                Output ONLY the HTML content for the `<main>` or central content area AND the `<script>` tag content, excluding `<html>`, `<head>`, `<body>`, header, and footer.
-                """
-
-            print(f"[MCOL] Generating content for {filename}...")
-            page_content_response = await call_llm_api(client, page_specific_prompt, model="google/gemini-1.5-pro-latest")
-
-            if page_content_response and isinstance(page_content_response.get("raw_inference"), str):
-                page_body_content = page_content_response["raw_inference"].strip()
-                # Construct full HTML
-                full_html = f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Acumenis - {filename.replace('.html','').capitalize()}</title> <!-- Dynamic Title -->
-    <meta name="description" content="Acumenis: AI-Powered Research Reports. Get market analysis & competitor intelligence in hours.">
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
-    {common_css}
-    <!-- Add page-specific CSS overrides here if needed -->
-</head>
-<body>
-    {common_header}
-    <main>
-        {page_body_content}
-    </main>
-    {common_footer}
-    <!-- Add page-specific JS here if not included in body content (like order.html) -->
-</body>
-</html>"""
+    async def analyze_website_conversion():
+        """Placeholder: Reads website files and asks LLM for conversion improvements."""
+        print("[MCOL] Attempting to analyze existing website files for conversion...")
+        results = []
+        files_to_analyze = ["index.html", "order.html"] # Focus on key pages
+        for filename in files_to_analyze:
+            filepath = os.path.join(WEBSITE_OUTPUT_DIR, filename)
+            if os.path.exists(filepath):
                 try:
-                    os.makedirs(WEBSITE_OUTPUT_DIR, exist_ok=True)
-                    filepath = os.path.join(WEBSITE_OUTPUT_DIR, filename)
-                    with open(filepath, "w", encoding="utf-8") as f: f.write(full_html)
-                    print(f"[MCOL] Successfully generated and saved website file: {filepath}")
-                    generated_files.append(filename)
+                    with open(filepath, "r", encoding="utf-8") as f:
+                        content = f.read()
+                    analysis_prompt = f"""
+                    Analyze the following HTML/JS content from the '{filename}' page of the Acumenis website.
+                    Identify potential conversion rate optimization (CRO) bottlenecks.
+                    Suggest 2-3 specific, actionable improvements focusing on clarity, call-to-action effectiveness, trust signals, and reducing friction.
+                    Keep suggestions concise. Output suggestions as a bulleted list.
+
+                    HTML/JS Content:
+                    ```html
+                    {content[:5000]}
+                    ```
+                    """ # Limit content length sent to LLM
+                    llm_response = await call_llm_api(client, analysis_prompt, model="google/gemini-1.5-flash-latest") # Use fast model
+                    if llm_response and isinstance(llm_response.get("raw_inference"), str):
+                        results.append(f"Analysis for {filename}:\n{llm_response['raw_inference'].strip()}")
+                    else:
+                        results.append(f"Analysis for {filename}: Failed to get suggestions from LLM.")
                 except Exception as e:
-                    errors.append(f"Failed to write {filename}: {e}")
-                    print(f"[MCOL] Failed to write {filename}: {e}")
+                    results.append(f"Analysis for {filename}: Error reading file - {e}")
             else:
-                errors.append(f"LLM failed to generate content for {filename}.")
-                print(f"[MCOL] LLM failed to generate content for {filename}.")
-            await asyncio.sleep(1) # Small delay between LLM calls
+                results.append(f"Analysis for {filename}: File not found.")
+        
+        return {"status": "SUGGESTED", "result": "\n---\n".join(results)}
 
-        if len(generated_files) == len(files_to_generate):
-            return {"status": "COMPLETED", "result": f"Generated website files: {', '.join(generated_files)}"}
-        else:
-            return {"status": "FAILED", "result": f"Failed to generate all website files. Errors: {'; '.join(errors)}"}
-
-    async def generate_payment_endpoint():
-        # ... (Remains SUGGESTED for safety) ...
-        print("[MCOL] Generating Lemon Squeezy payment endpoint code suggestion...")
-        # ... (payment_prompt remains the same) ...
-        # ... (LLM call logic remains the same) ...
-        print(f"[MCOL] SUGGESTION: Create 'Acumenis/app/api/endpoints/payments.py' with generated code. Add router inclusion to 'Acumenis/app/main.py'. Requires manual Lemon Squeezy product setup.")
-        return {"status": "SUGGESTED", "result": "Code generated for payments endpoint and main.py modification suggested. Requires manual product setup."}
-
-    async def generate_report_delivery_code():
-        # ... (Remains SUGGESTED for safety) ...
-        print("[MCOL] Generating report delivery code modification suggestion...")
-        # ... (delivery_prompt remains the same) ...
-        # ... (LLM call logic remains the same) ...
-        print(f"[MCOL] SUGGESTION: Modify 'Acumenis/app/agents/report_generator.py' to include report delivery logic.")
-        return {"status": "SUGGESTED", "result": "Code modification suggested for report_generator.py to implement report delivery."}
-
-    async def suggest_linkedin_actions():
-        # ... (Remains SUGGESTED for safety) ...
-        print("[MCOL] Generating suggestions for manual LinkedIn actions...")
-        result_text = "Suggest operator manually review prospects with identified executives in DB (Prospect.key_executives). Craft personalized LinkedIn connection requests referencing recent signals/pain points."
-        print(f"[MCOL] {result_text}")
-        return {"status": "SUGGESTED", "result": result_text}
+    async def suggest_manual_action(description: str):
+        """Formats a suggestion for manual action."""
+        print(f"[MCOL] Suggesting Manual Action: {description}")
+        return {"status": "SUGGESTED", "result": f"Suggestion: {description}"}
 
     # --- Strategy Execution Mapping ---
-    implementation_result = {"status": "FAILED", "result": "Strategy not recognized or executable."}
+    implementation_result = {"status": "FAILED", "result": "Strategy implementation logic not defined or failed."}
+    suggestion_text = f"Suggest manually implementing strategy: {strategy['name']}. Description: {strategy['description']}"
 
-    # Prioritize critical path: Website -> Payments -> Delivery
-    if "website" in strategy_name and ("generate" in strategy_name or "seo" in strategy_name):
-        # Execute website generation directly
-        implementation_result = await generate_multi_page_website()
-    elif "payment" in strategy_name and ("implement" in strategy_name or "debug" in strategy_name):
-         print("[MCOL] WARNING: Lemon Squeezy strategy requires manual product setup in Lemon Squeezy dashboard first.")
-         implementation_result = await generate_payment_endpoint() # Returns SUGGESTED status
-    elif "report delivery" in strategy_name:
-        implementation_result = await generate_report_delivery_code() # Returns SUGGESTED status
-    elif "linkedin prospecting" in strategy_name:
-         implementation_result = await suggest_linkedin_actions()
-    # Add more handlers...
-    else:
-         implementation_result = {"status": "SUGGESTED", "result": f"Suggest manually implementing strategy: {strategy['name']}. Desc: {strategy['description']}"}
+    # --- Strategy Execution Mapping (Focus on SUGGEST mode) ---
+    if MCOL_IMPLEMENTATION_MODE == "SUGGEST":
+        # In SUGGEST mode, most strategies just log their description as a suggestion.
+        # Specific analysis strategies might run but still result in suggestions.
+        if "analyze website conversion" in strategy_name:
+             implementation_result = await analyze_website_conversion()
+        # Add other specific analysis handlers here if needed
+        # elif "analyze email performance" in strategy_name: ...
+        else:
+             # Default for SUGGEST mode is just logging the strategy description
+             implementation_result = await suggest_manual_action(strategy['description'])
+
+    # --- Placeholder for Future Execution Modes ---
+    # elif MCOL_IMPLEMENTATION_MODE == "EXECUTE_PROMPT_TUNING":
+    #     if "tune email prompts" in strategy_name:
+    #         # implementation_result = await execute_prompt_update(...) # Example
+    #         pass
+    #     else:
+    #         implementation_result = await suggest_manual_action(strategy['description']) # Fallback to suggest
+    # elif MCOL_IMPLEMENTATION_MODE == "EXECUTE_SAFE_CONFIG":
+    #      # Example: Adjusting delays, enabling/disabling features via DB flags
+    #      pass
+    else: # Default or unknown mode -> Suggest
+        implementation_result = await suggest_manual_action(strategy['description'])
 
 
     print(f"[MCOL] Implementation outcome for '{strategy['name']}': {implementation_result['status']} - {implementation_result['result']}")
