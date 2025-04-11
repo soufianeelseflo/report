@@ -28,7 +28,7 @@ class ReportRequest(Base):
     company_name = Column(String(255), nullable=True)
     report_type = Column(String(50), nullable=False) # e.g., 'standard_499', 'premium_999', 'unknown_paid'
     request_details = Column(Text, nullable=False)
-    status = Column(String(50), nullable=False, default='AWAITING_PAYMENT', index=True) # AWAITING_PAYMENT, PENDING, PROCESSING, COMPLETED, FAILED
+    status = Column(String(50), nullable=False, default='AWAITING_GENERATION', index=True) # AWAITING_PAYMENT (deprecate?), AWAITING_GENERATION, PENDING, PROCESSING, COMPLETED, FAILED, DELIVERY_FAILED
     report_output_path = Column(String(1024), nullable=True) # Path to generated report file/data
     error_message = Column(Text, nullable=True) # Store errors if status is FAILED
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -47,10 +47,10 @@ class Prospect(Base):
     company_name = Column(String(255), nullable=False)
     website = Column(String(255), nullable=True)
     contact_name = Column(String(255), nullable=True)
-    contact_email = Column(String(255), nullable=True, unique=True, index=True)
+    contact_email = Column(String(255), nullable=True, unique=True, index=True) # Email guessing means not always unique in practice if guesses overlap, but keep constraint for now
     potential_pain_point = Column(Text, nullable=True)
-    source = Column(String(100), nullable=True) # 'signal_news', 'signal_linkedin', 'manual' etc.
-    status = Column(String(50), nullable=False, default='NEW', index=True) # NEW, RESEARCHING, CONTACTED, REPLY_POSITIVE, REPLY_NEGATIVE, BOUNCED, UNSUBSCRIBED, DO_NOT_CONTACT, INVALID_EMAIL
+    source = Column(String(100), nullable=True) # 'odr_<query>', 'manual' etc.
+    status = Column(String(50), nullable=False, default='NEW', index=True) # NEW, CONTACTED, BOUNCED, FAILED_GENERATION, FAILED_SEND, INVALID_EMAIL
     last_contacted_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
@@ -61,18 +61,19 @@ class EmailAccount(Base):
     __tablename__ = 'email_accounts'
 
     account_id = Column(Integer, primary_key=True, index=True)
-    email_address = Column(String(255), nullable=False, unique=True)
+    email_address = Column(String(255), nullable=False, unique=True) # The actual Gmail address
+    alias_email = Column(String(255), nullable=True, index=True) # The alias to send FROM (e.g., research@yourdomain.com)
     smtp_host = Column(String(255), nullable=False)
     smtp_port = Column(Integer, nullable=False)
-    smtp_user = Column(String(255), nullable=False)
-    smtp_password_encrypted = Column(Text, nullable=False) # Store encrypted!
-    provider = Column(String(100), nullable=True) # 'sendgrid_free', 'mailgun_flex', 'brevo_free'
-    daily_limit = Column(Integer, nullable=False, default=100)
+    smtp_user = Column(String(255), nullable=False) # Usually same as email_address for Gmail
+    smtp_password_encrypted = Column(Text, nullable=False) # Store encrypted App Password!
+    provider = Column(String(100), nullable=True, default='gmail') # 'gmail', 'sendgrid_free', etc.
+    daily_limit = Column(Integer, nullable=False, default=30) # Start low for warm-up
     emails_sent_today = Column(Integer, nullable=False, default=0)
     last_used_at = Column(DateTime(timezone=True), nullable=True)
     last_reset_date = Column(Date, nullable=False, default=datetime.date.today)
-    is_active = Column(Boolean, default=True, nullable=False)
-    notes = Column(Text, nullable=True) # e.g., domain associated, warmup status
+    is_active = Column(Boolean, default=True, nullable=False, index=True)
+    notes = Column(Text, nullable=True) # e.g., domain associated, warmup status, deactivation reason
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -83,22 +84,27 @@ class KpiSnapshot(Base):
     snapshot_id = Column(Integer, primary_key=True, index=True)
     timestamp = Column(DateTime(timezone=True), server_default=func.now(), index=True)
     # Report Metrics
-    awaiting_payment_reports = Column(Integer)
-    pending_reports = Column(Integer)
-    processing_reports = Column(Integer)
-    completed_reports_24h = Column(Integer)
-    failed_reports_24h = Column(Integer)
+    awaiting_payment_reports = Column(Integer, default=0)
+    awaiting_generation_reports = Column(Integer, default=0) # Added
+    pending_reports = Column(Integer, default=0) # Now means pending agent task pickup
+    processing_reports = Column(Integer, default=0)
+    completed_reports_24h = Column(Integer, default=0)
+    failed_reports_24h = Column(Integer, default=0)
+    delivery_failed_reports_24h = Column(Integer, default=0) # Added
     avg_report_time_seconds = Column(Float, nullable=True)
     # Prospecting Metrics
-    new_prospects_24h = Column(Integer)
+    new_prospects_24h = Column(Integer, default=0)
     # Email Metrics
-    emails_sent_24h = Column(Integer)
-    active_email_accounts = Column(Integer)
-    deactivated_accounts_24h = Column(Integer)
+    emails_sent_24h = Column(Integer, default=0)
+    active_email_accounts = Column(Integer, default=0)
+    deactivated_accounts_24h = Column(Integer, default=0)
     bounce_rate_24h = Column(Float, nullable=True) # Percentage
     # Financial Metrics
     revenue_24h = Column(Float, default=0.0) # Calculated from successful orders
     orders_created_24h = Column(Integer, default=0)
+    # Resource Metrics
+    active_api_keys = Column(Integer, default=0) # Added
+    deactivated_api_keys_24h = Column(Integer, default=0) # Added
     # MCOL can add more KPIs as it learns
 
 class McolDecisionLog(Base):
@@ -127,11 +133,11 @@ class ApiKey(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     # Store the API key encrypted using functions from core.security
-    api_key_encrypted = Column(Text, nullable=False)
+    api_key_encrypted = Column(Text, nullable=False, unique=True) # Encrypted key should be unique
     provider = Column(String(100), nullable=False, index=True, default='openrouter') # Default provider
     email_used = Column(String(255), nullable=True) # Temp email used for acquisition
     proxy_used = Column(String(255), nullable=True) # Proxy used for acquisition
-    status = Column(String(50), nullable=False, default='active', index=True) # active, inactive, banned, error
+    status = Column(String(50), nullable=False, default='active', index=True) # active, inactive, banned, error, rate_limited
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     last_used_at = Column(DateTime(timezone=True), nullable=True)
     # Optional: Add notes field for errors during acquisition or usage issues
@@ -144,12 +150,12 @@ class AgentTask(Base):
     __tablename__ = 'agent_tasks'
 
     task_id = Column(Integer, primary_key=True, index=True)
-    agent_name = Column(String(100), nullable=False, index=True)
+    agent_name = Column(String(100), nullable=False, index=True) # e.g., ReportGenerator, ProspectResearcher
     status = Column(String(50), nullable=False, default='PENDING', index=True) # PENDING, IN_PROGRESS, COMPLETED, FAILED, WAITING
-    priority = Column(Integer, default=0, nullable=False)
-    goal = Column(Text, nullable=False)
-    parameters = Column(JSON, nullable=True)
-    result = Column(Text, nullable=True)
+    priority = Column(Integer, default=0, nullable=False) # Higher number = higher priority
+    goal = Column(Text, nullable=False) # e.g., "Generate Report", "Research Query"
+    parameters = Column(JSON, nullable=True) # e.g., {"report_request_id": 123}, {"query": "..."}
+    result = Column(Text, nullable=True) # Store outcome or error message
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     depends_on_task_id = Column(Integer, ForeignKey('agent_tasks.task_id'), nullable=True)

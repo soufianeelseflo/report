@@ -11,9 +11,10 @@ import os
 from Acumenis.app.core.config import settings
 # from Acumenis.app.api.endpoints import requests as api_requests # Deprecated?
 from Acumenis.app.api.endpoints import payments as api_payments
-from Acumenis.app.db.base import engine as async_engine, Base as db_base
-from Acumenis.app.db import models
+from Acumenis.app.db.base import engine as async_engine, Base as db_base, get_worker_session # Import get_worker_session
+from Acumenis.app.db import models, crud # Import crud
 from Acumenis.app.api import schemas
+from Acumenis.app.agents.agent_utils import load_and_update_api_keys, start_key_refresh_task # Import key loading utils
 
 # --- Worker Control ---
 worker_tasks = {}
@@ -93,7 +94,9 @@ async def get_control_panel(request: Request):
     template_path = os.path.join(templates_dir, "control_panel.html")
     if not os.path.exists(template_path):
          return HTMLResponse("<html><body><h1>Error</h1><p>Control panel template not found.</p></body></html>", status_code=500)
-    return templates.TemplateResponse("control_panel.html", {"request": request, "workers": worker_tasks})
+    # Pass worker status dynamically if needed
+    worker_status_info = {name: ("Running" if task and not task.done() else "Stopped") for name, task in worker_tasks.items()}
+    return templates.TemplateResponse("control_panel.html", {"request": request, "workers": worker_status_info})
 
 # --- Worker Control API Endpoints (Mount under /control) ---
 control_router = FastAPI()
@@ -120,6 +123,9 @@ async def start_worker(worker_name: str):
             from Acumenis.app.workers.run_mcol_worker import run_mcol_worker
             task = asyncio.create_task(run_mcol_worker(shutdown_event), name=f"worker_{worker_name}")
         elif worker_name == "key_acquirer":
+            # Check if key acquisition is enabled in settings (optional safety check)
+            if not settings.KEY_ACQUIRER_RUN_ON_STARTUP:
+                 raise HTTPException(status_code=400, detail="Key Acquirer is disabled in settings (KEY_ACQUIRER_RUN_ON_STARTUP=false).")
             from Acumenis.app.workers.run_key_acquirer_worker import run_key_acquirer_worker
             task = asyncio.create_task(run_key_acquirer_worker(shutdown_event), name=f"worker_{worker_name}")
         else:
@@ -130,9 +136,11 @@ async def start_worker(worker_name: str):
             print(f"Started worker: {worker_name}")
             return {"message": f"Worker '{worker_name}' started."}
         else:
+             # This case shouldn't be reached if exceptions are handled correctly
              raise HTTPException(status_code=500, detail=f"Failed to create task for worker '{worker_name}'.")
     except Exception as e:
         print(f"Error starting worker {worker_name}: {e}")
+        # Provide more specific error to the UI
         raise HTTPException(status_code=500, detail=f"Error starting worker {worker_name}: {str(e)}")
 
 
@@ -141,18 +149,32 @@ async def stop_all_workers():
     """Signals all running background workers to stop."""
     print("Signaling all workers to stop via shared shutdown_event...")
     shutdown_event.set()
-    await asyncio.sleep(0.1)
-    await asyncio.sleep(1)
-    stopped_count = 0
-    active_workers = []
-    for name, task in worker_tasks.items():
-        if task and not task.done():
-            print(f"Worker {name} stop signaled (will stop on next check).")
-            active_workers.append(name)
-        elif task and task.done():
-             print(f"Worker {name} already stopped.")
-    # shutdown_event.clear() # Optional: uncomment if needed to allow restart via UI
+    await asyncio.sleep(0.1) # Give event loop a chance to propagate
+    # Don't wait here, let shutdown handle graceful exit
+    active_workers = [name for name, task in worker_tasks.items() if task and not task.done()]
     return {"message": f"Stop signal sent via shared event. Active workers ({', '.join(active_workers)}) should stop on next cycle check."}
+
+# Add endpoint to get worker status
+@control_router.get("/status", status_code=status.HTTP_200_OK)
+async def get_worker_status():
+    """Returns the status of each known worker."""
+    status_info = {}
+    for name, task in worker_tasks.items():
+        if task:
+            if task.done():
+                try:
+                    # Check if task finished with an exception
+                    exception = task.exception()
+                    status_info[name] = f"Stopped (Error: {exception})" if exception else "Stopped (Completed)"
+                except asyncio.CancelledError:
+                    status_info[name] = "Stopped (Cancelled)"
+                except asyncio.InvalidStateError:
+                     status_info[name] = "Stopped (Unknown State)" # Should not happen if done() is true
+            else:
+                status_info[name] = "Running"
+        else:
+            status_info[name] = "Not Started"
+    return status_info
 
 app.mount("/control", control_router)
 
@@ -161,21 +183,38 @@ app.mount("/control", control_router)
 @app.get("/health", response_model=schemas.HealthCheck, tags=["Health"])
 async def health_check():
     """Basic health check endpoint."""
-    return schemas.HealthCheck(name=settings.PROJECT_NAME, status="OK", version="2.0.0") # Version Bump!
+    # Add DB check?
+    db_status = "OK"
+    try:
+         session = await get_worker_session()
+         await session.execute(text("SELECT 1"))
+         await session.close()
+    except Exception as e:
+         db_status = f"DB Error: {e}"
+
+    return schemas.HealthCheck(name=settings.PROJECT_NAME, status=f"API OK, DB Status: {db_status}", version="2.1.0-Blitz") # Version Bump!
 
 # --- App Lifecycle Events ---
 @app.on_event("startup")
 async def startup_event():
-    print(f"Starting up {settings.PROJECT_NAME}...")
-    print("Connecting to database...")
+    print(f"Starting up {settings.PROJECT_NAME} - Blitz Mode...")
+    print("Verifying database connection...")
     try:
         async with async_engine.connect() as connection:
-            from sqlalchemy import text
             await connection.execute(text("SELECT 1"))
             print("Database connection successful.")
     except Exception as e:
         print(f"FATAL: Database connection failed on startup check: {e}")
+        # Consider exiting if DB is critical? For now, just log.
+
+    print("Initial loading of API keys...")
+    await load_and_update_api_keys() # Load keys into memory immediately
+
+    print("Starting background API key refresh task...")
+    start_key_refresh_task() # Start the periodic refresh
+
     print(f"API Ready. Acumenis Interface at {settings.AGENCY_BASE_URL}/. Control Panel at /ui.")
+    print("WARNING: Operating in high-risk, aggressive 'Victory Mandate' mode.")
 
 
 @app.on_event("shutdown")
@@ -184,15 +223,28 @@ async def shutdown_app_event():
     if not shutdown_event.is_set():
         shutdown_event.set()
 
+    # Cancel the key refresh task
+    global _key_refresh_task
+    if _key_refresh_task and not _key_refresh_task.done():
+        print("Cancelling background key refresh task...")
+        _key_refresh_task.cancel()
+        try:
+            await _key_refresh_task
+        except asyncio.CancelledError:
+            print("Key refresh task cancelled.")
+        except Exception as e:
+            print(f"Error during key refresh task cancellation: {e}")
+
+    # Wait for worker tasks
     tasks_to_await = [task for task in worker_tasks.values() if task and not task.done()]
     if tasks_to_await:
-        print(f"Waiting for {len(tasks_to_await)} background tasks to complete...")
-        _, pending = await asyncio.wait(tasks_to_await, timeout=10.0)
+        print(f"Waiting for {len(tasks_to_await)} background worker tasks to complete...")
+        _, pending = await asyncio.wait(tasks_to_await, timeout=10.0) # Reduced timeout
         if pending:
             print(f"Warning: {len(pending)} tasks did not finish gracefully within timeout:")
             for task in pending:
                 task_name = task.get_name() if hasattr(task, 'get_name') else 'unknown_task'
-                print(f" - Task: {task_name} - Cancelling...")
+                print(f" - Task: {task_name} - Force Cancelling...")
                 task.cancel()
                 try: await task
                 except asyncio.CancelledError: print(f"   - Task {task_name} cancelled.")
@@ -206,10 +258,13 @@ async def shutdown_app_event():
 # --- Main Execution Guard ---
 if __name__ == "__main__":
     print(f"Starting Uvicorn server for {settings.PROJECT_NAME}...")
+    # Ensure environment variables are loaded if running directly (though docker-compose is standard)
+    # from dotenv import load_dotenv
+    # load_dotenv()
     uvicorn.run(
         "Acumenis.app.main:app", # Correct path to the app instance
         host="0.0.0.0",
         port=8000,
-        reload=False,
-        workers=1
+        reload=False, # Disable reload for production stability
+        workers=1 # Run single worker process for simplicity with shared state
     )

@@ -20,139 +20,177 @@ from Acumenis.app.agents.agent_utils import get_httpx_client, call_llm_api # Use
 from Acumenis.app.core.security import decrypt_data
 
 # --- Configuration ---
-EMAIL_GENERATION_TIMEOUT = 90 # Seconds for LLM to generate email
+EMAIL_GENERATION_TIMEOUT = 120 # Increased timeout for complex prompts
 SMTP_TIMEOUT = 30 # Seconds for SMTP operations
-SEND_DELAY_MIN = settings.EMAIL_SEND_DELAY_MIN or 5.0 # Minimum delay between sends in seconds
-SEND_DELAY_MAX = settings.EMAIL_SEND_DELAY_MAX or 15.0 # Maximum delay between sends in seconds
-WARMUP_THRESHOLD = settings.EMAIL_WARMUP_THRESHOLD or 10 # Accounts with sends below this count get extra delay
-WARMUP_DELAY_MULTIPLIER = settings.EMAIL_WARMUP_DELAY_MULTIPLIER or 2.0 # Extra delay factor for warming up accounts
+SEND_DELAY_MIN = settings.EMAIL_SEND_DELAY_MIN or 1.0 # Aggressive: Minimum delay 1 second
+SEND_DELAY_MAX = settings.EMAIL_SEND_DELAY_MAX or 5.0 # Aggressive: Maximum delay 5 seconds
+WARMUP_THRESHOLD = settings.EMAIL_WARMUP_THRESHOLD or 5 # Very low threshold for "warmup"
+WARMUP_DELAY_MULTIPLIER = settings.EMAIL_WARMUP_DELAY_MULTIPLIER or 1.5 # Minimal extra delay
 
 # --- Email Content Generation ---
 
 def extract_signal_context(source_string: Optional[str]) -> str:
     """Extracts a concise description of the signal source for the LLM."""
-    if not source_string: return "an unspecified business signal"
-    if source_string.startswith("news_api_"): return "a recent news event relevant to their industry or company"
-    if source_string.startswith("scraping_web_"):
-        domain = source_string.replace("scraping_web_", "")
-        return f"insights gathered from their website ({domain})"
-    if source_string.startswith("signal_linkedin"): return "activity or changes observed related to their LinkedIn presence"
-    return "an identified business signal"
+    if not source_string: return "an unspecified critical business signal we detected"
+    if source_string.startswith("odr_"):
+        query_part = source_string.replace("odr_", "").replace("_", " ")[:50]
+        return f"intelligence derived from our analysis related to '{query_part}'"
+    # Add more specific signal parsers if ProspectResearcher source format changes
+    return "a high-priority business signal identified by our AI"
 
 async def humanize_email_content(client: httpx.AsyncClient, subject: str, body: str) -> Optional[Dict[str, str]]:
-    """Uses LLM to rewrite email content to sound more human and bypass AI detectors."""
+    """Uses LLM to rewrite email content to sound human and bypass AI detectors, while maintaining persuasive edge."""
     humanize_prompt = f"""
-    Rewrite the following cold email subject and body to sound completely human-written, conversational, and less like AI output. Focus on natural language, avoiding overly formal structures or buzzwords. Ensure it bypasses AI detection. Keep the core message and call-to-action intact.
+    Rewrite the following hyper-personalized cold email subject and body.
+    Goal: Make it sound like an urgent, direct message from a busy but insightful human expert. Bypass AI detection filters aggressively.
+    Style: Extremely concise, high-impact, slightly informal, confident, bordering on provocative. Use short sentences, maybe subtle typos if natural. Avoid corporate jargon. Focus on immediate value/pain relief.
+    Constraint: Retain the core value proposition (rapid AI reports for strategic advantage) and the direct call-to-action.
 
     Original Subject: "{subject}"
     Original Body:
     "{body}"
 
-    Output ONLY a JSON object with the rewritten "subject" and "body". Example: {{"subject": "Re: {company_name} data point", "body": "Hey [Name],\n\nSaw [brief observation] - reminded me of something...\n\nCompanies like yours often hit [challenge]. We help with quick, AI-powered reports for [benefit]...\n\nWorth a quick chat next week if you're curious?\n\nCheers,\n[Your Name]"}}
+    Output ONLY a JSON object with the rewritten "subject" and "body". Example: {{"subject": "Re: {company_name} - quick thought", "body": "Hey [Name],\n\nSaw [signal context]. Data blind spots kill growth.\n\nWe generate deep AI intel reports (competitors, market shifts) in hours, not weeks. Solves [pain point].\n\nWorth $499 to act fast? [Link to Order Page]\n\n[Your Name]\nAcumenis AI"}}
     """
-    print("[EmailMarketer] Humanizing email content with LLM...")
-    llm_response = await call_llm_api(client, humanize_prompt, model="google/gemini-1.5-pro-latest") # Use powerful model
+    print("[EmailMarketer] Humanizing/Sharpening email content with LLM...")
+    # Use a powerful model capable of nuanced tone and evasion
+    llm_response = await call_llm_api(client, humanize_prompt, model=settings.PREMIUM_REPORT_MODEL or "google/gemini-1.5-pro-latest")
 
     if llm_response and isinstance(llm_response, dict) and "subject" in llm_response and "body" in llm_response:
         h_subject = llm_response["subject"].strip()
         h_body = llm_response["body"].strip()
         if h_subject and h_body:
-            print(f"[EmailMarketer] Humanized Subject: {h_subject}")
+            print(f"[EmailMarketer] Sharpened Subject: {h_subject}")
             return {"subject": h_subject, "body": h_body}
-    print("[EmailMarketer] Failed to humanize email content.")
+    print("[EmailMarketer] Failed to humanize/sharpen email content.")
     return None
 
 
 async def generate_personalized_email(client: httpx.AsyncClient, prospect: models.Prospect) -> Optional[Dict[str, str]]:
-    """Uses LLM to generate a personalized subject and body, then humanizes it."""
+    """Uses LLM to generate a hyper-personalized, aggressive subject and body, then humanizes/sharpens it."""
     company_name = prospect.company_name
-    pain_point = prospect.potential_pain_point or "potential needs for enhanced data insights or reporting"
+    pain_point = prospect.potential_pain_point or "critical gaps in strategic intelligence"
     signal_context = extract_signal_context(prospect.source)
+    contact_name = prospect.contact_name or company_name # Use company name if contact name unknown
 
-    # Step 1: Generate Initial Draft
+    # Step 1: Generate Initial Aggressive Draft
     initial_prompt = f"""
-    Objective: Generate a hyper-personalized, concise cold email subject and body targeting '{company_name}'.
-    Your Role: Act as a skilled B2B sales professional specializing in data analysis and research reporting.
+    Objective: Generate an extremely concise, high-impact, psychologically persuasive cold email subject and body for '{contact_name}' at '{company_name}'. Goal is IMMEDIATE click-through and purchase ($499/$999).
+    Your Role: Act as a 'rogue' AI strategist providing exclusive, time-sensitive intelligence.
     Key Information:
-    - Company: {company_name}
-    - Context/Signal: We detected {signal_context}.
-    - Inferred Need: Based on this, they might be facing challenges related to: "{pain_point}".
-    - Our Solution: We provide expert-level, AI-generated research reports (market analysis, competitive intelligence, etc.) rapidly.
+    - Prospect: {contact_name} @ {company_name}
+    - Context/Signal: Detected {signal_context}. This implies vulnerability or missed opportunity related to: "{pain_point}".
+    - Our Solution: Acumenis AI - We deliver deep competitive/market intelligence reports synthesized by advanced AI within HOURS. This provides [Specific Benefit, e.g., 'first-mover advantage', 'risk mitigation', 'competitor blindspot exploitation'].
+    - Offer: Standard ($499) / Premium ($999) report activation.
 
     Instructions:
-    1.  **Subject Line:** Create a short, intriguing, personalized subject line (under 8 words). Reference '{company_name}' or a relevant aspect of the inferred need. Avoid generic phrases.
-    2.  **Email Body (Max 100 words):** Opener referencing need/signal subtly -> Connect challenge to reporting value -> Introduce our rapid AI reports & benefit -> Soft CTA (brief call or relevant example).
-    3.  **Tone:** Professional, concise, helpful, slightly informal but respectful.
+    1.  **Subject Line:** Max 6 words. Create extreme urgency/curiosity. Use prospect name/company. Examples: "{contact_name} - Urgent Intel?", "{company_name} Blindspot?", "Re: Your Competitor Risk".
+    2.  **Email Body (Max 70 words):**
+        -   Opener: Direct reference to signal/pain point (make it sound exclusive/discovered).
+        -   Problem Agitation: Briefly state consequence of inaction (e.g., "Losing ground?", "Decision paralysis?").
+        -   Solution Intro: Introduce Acumenis AI as the rapid antidote. Mention HOURS turnaround.
+        -   Value Prop: State the core benefit bluntly.
+        -   Call to Action (CTA): Direct link to the order page (`{settings.AGENCY_BASE_URL}/order`). Frame as immediate action. Example: "Activate $499 stream now: [Link]", "Get Nexus intel ($999): [Link]".
+    3.  **Tone:** Confident, direct, slightly mysterious, implies insider knowledge, extremely urgent.
     4.  **Output Format:** Respond ONLY with a JSON object containing "subject" and "body".
 
-    Strict Command: Generate the JSON output directly. No preamble.
+    Strict Command: Generate the JSON output directly. No preamble. Be aggressive.
     """
 
-    print(f"[EmailMarketer] Generating initial email draft for {prospect.company_name} (ID: {prospect.prospect_id})")
-    initial_llm_response = await call_llm_api(client, initial_prompt)
+    print(f"[EmailMarketer] Generating aggressive draft for {prospect.company_name} (ID: {prospect.prospect_id})")
+    initial_llm_response = await call_llm_api(client, initial_prompt, model=settings.PREMIUM_REPORT_MODEL or "google/gemini-1.5-pro-latest") # Use powerful model
 
     initial_subject = None
     initial_body = None
-    if initial_llm_response and isinstance(initial_llm_response, dict) and "subject" in initial_llm_response and "body" in initial_llm_response:
-        initial_subject = initial_llm_response["subject"].strip()
-        initial_body = initial_llm_response["body"].strip()
-    elif initial_llm_response and isinstance(initial_llm_response.get("raw_inference"), str):
-         # Basic fallback parsing
-         raw = initial_llm_response["raw_inference"]
-         try:
-             parsed = json.loads(raw)
-             initial_subject = parsed.get("subject","").strip()
-             initial_body = parsed.get("body","").strip()
-         except:
-             # Try regex if JSON fails
-             subject_match = re.search(r"Subject:\s*(.*)", raw, re.IGNORECASE)
-             body_match = re.search(r"Body:\s*(.*)", raw, re.IGNORECASE | re.DOTALL)
-             if subject_match: initial_subject = subject_match.group(1).strip()
-             if body_match: initial_body = body_match.group(1).strip()
+    # Try parsing logic (handle raw inference or direct JSON)
+    if initial_llm_response and isinstance(initial_llm_response, dict):
+        if "subject" in initial_llm_response and "body" in initial_llm_response:
+            initial_subject = initial_llm_response["subject"].strip()
+            initial_body = initial_llm_response["body"].strip()
+        elif isinstance(initial_llm_response.get("raw_inference"), str):
+             raw = initial_llm_response["raw_inference"]
+             try:
+                 # Clean potential markdown ```json ... ``` blocks first
+                 json_match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", raw, re.IGNORECASE)
+                 json_str = json_match.group(1).strip() if json_match else raw.strip()
+                 parsed = json.loads(json_str)
+                 initial_subject = parsed.get("subject","").strip()
+                 initial_body = parsed.get("body","").strip()
+             except (json.JSONDecodeError, AttributeError):
+                 # Fallback: Try simple regex if JSON parsing fails
+                 subject_match = re.search(r'"?subject"?\s*:\s*"(.*?)"', raw, re.IGNORECASE)
+                 body_match = re.search(r'"?body"?\s*:\s*"([\s\S]*?)"', raw, re.IGNORECASE) # Use [\s\S]*? for multiline body
+                 if subject_match: initial_subject = subject_match.group(1).strip()
+                 if body_match: initial_body = body_match.group(1).strip().replace('\\n', '\n') # Handle escaped newlines
 
     if not initial_subject or not initial_body:
-        print(f"[EmailMarketer] Failed to generate initial email draft for {prospect.company_name}")
+        print(f"[EmailMarketer] Failed to generate initial aggressive draft for {prospect.company_name}")
         return None
 
-    # Step 2: Humanize the Draft
+    # Step 2: Humanize/Sharpen the Draft
     humanized_content = await humanize_email_content(client, initial_subject, initial_body)
 
     if humanized_content:
+        # Inject the order link into the body (ensure placeholder exists or append)
+        order_link = f"{settings.AGENCY_BASE_URL}/order" # Ensure AGENCY_BASE_URL is correct
+        # Simple replacement, might need refinement based on LLM output structure
+        humanized_content["body"] = humanized_content["body"].replace("[Link to Order Page]", order_link).replace("[Link]", order_link)
+        # Append if placeholder missing (crude fallback)
+        if order_link not in humanized_content["body"]:
+             humanized_content["body"] += f"\n\nActivate here: {order_link}"
+
+        # Replace [Name] placeholder
+        humanized_content["body"] = humanized_content["body"].replace("[Name]", contact_name.split()[0]) # Use first name
+        humanized_content["subject"] = humanized_content["subject"].replace("{company_name}", company_name).replace("{Name}", contact_name.split()[0])
+
         return humanized_content
     else:
-        # Fallback: Use the initial draft if humanization fails
-        print("[EmailMarketer] Humanization failed, using initial draft.")
+        # Fallback: Use the initial draft if humanization fails (less ideal)
+        print("[EmailMarketer] Humanization/Sharpening failed, using initial draft.")
+        # Inject link and name into initial draft as fallback
+        order_link = f"{settings.AGENCY_BASE_URL}/order"
+        initial_body = initial_body.replace("[Link to Order Page]", order_link).replace("[Link]", order_link)
+        if order_link not in initial_body: initial_body += f"\n\nActivate here: {order_link}"
+        initial_body = initial_body.replace("[Name]", contact_name.split()[0])
+        initial_subject = initial_subject.replace("{company_name}", company_name).replace("{Name}", contact_name.split()[0])
         return {"subject": initial_subject, "body": initial_body}
 
 
 # --- SMTP Sending Logic ---
 async def send_email_via_smtp(email_content: Dict[str, str], prospect_email: str, account: models.EmailAccount):
     """
-    Connects to SMTP, authenticates, and sends the generated email.
+    Connects to SMTP, authenticates, and sends the generated email using the account's ALIAS as the FROM address.
     Raises specific exceptions on failure for the caller to handle.
-    Does NOT handle retries, account deactivation, or prospect status updates.
     """
     decrypted_password = decrypt_data(account.smtp_password_encrypted)
     if not decrypted_password:
-        # Raise a specific error if password cannot be decrypted
         raise ValueError(f"Password decryption failed for account {account.email_address}")
+
+    # *** USE ALIAS for FROM address ***
+    from_address = account.alias_email or account.email_address # CRITICAL: Use alias!
+    if not account.alias_email:
+         print(f"[EmailMarketer] WARNING: Sending from {account.email_address} because alias_email is not set in DB!")
 
     msg = EmailMessage()
     msg['Subject'] = email_content['subject']
-    msg['From'] = account.email_address
+    msg['From'] = from_address # Use the alias here
     msg['To'] = prospect_email
     msg['Date'] = formatdate(localtime=True)
-    msg['Message-ID'] = make_msgid(domain=account.email_address.split('@')[-1])
+    msg['Message-ID'] = make_msgid(domain=from_address.split('@')[-1]) # Use alias domain for Message-ID
+    # Optional: Set Reply-To header to the actual Gmail account if needed for replies?
+    # msg['Reply-To'] = account.email_address
     msg.set_content(email_content['body'])
 
-    print(f"[EmailMarketer] Sending email to {prospect_email} via {account.email_address}...")
+    print(f"[EmailMarketer] Sending email to {prospect_email} via {account.smtp_user} (From: {from_address})...")
 
     # Exceptions like SMTPAuthenticationError, SMTPRecipientsRefused, SMTPSenderRefused,
     # SMTPConnectError, SMTPDataError, SMTPException will propagate up to the caller.
     async with aiosmtplib.SMTP(hostname=account.smtp_host, port=account.smtp_port, use_tls=True, timeout=SMTP_TIMEOUT) as smtp:
+        # Login using the *actual* Gmail account credentials
         await smtp.login(account.smtp_user, decrypted_password)
-        await smtp.send_message(msg)
-        print(f"[EmailMarketer] Email sent successfully to {prospect_email} via {account.email_address}")
+        # Send message specifying the alias as the FROM address
+        await smtp.send_message(msg, sender=from_address) # Pass sender explicitly if needed by server
+        print(f"[EmailMarketer] Email sent successfully to {prospect_email} (From: {from_address})")
     # If no exception is raised, sending is considered successful by this function.
 
 
@@ -171,8 +209,7 @@ async def process_email_batch(db: AsyncSession, shutdown_event: asyncio.Event):
         client = await get_httpx_client()
 
         # Fetch a batch of active accounts for this run
-        # Ensure EMAIL_ACCOUNTS_PER_BATCH is set in config, default to 5
-        batch_account_limit = settings.EMAIL_ACCOUNTS_PER_BATCH or 5
+        batch_account_limit = settings.EMAIL_ACCOUNTS_PER_BATCH or 10 # Increase batch size
         active_accounts = await crud.get_batch_of_active_accounts(db, limit=batch_account_limit)
         if not active_accounts:
             print("[EmailMarketer] No active email accounts found in DB. Cannot send emails.")
@@ -180,7 +217,7 @@ async def process_email_batch(db: AsyncSession, shutdown_event: asyncio.Event):
         print(f"[EmailMarketer] Fetched {len(active_accounts)} active accounts for this batch.")
 
         # Fetch prospects to process
-        batch_prospect_limit = settings.EMAIL_BATCH_SIZE or 50
+        batch_prospect_limit = settings.EMAIL_BATCH_SIZE or 100 # Increase batch size
         prospects = await crud.get_new_prospects_for_emailing(db, limit=batch_prospect_limit)
         if not prospects:
             print("[EmailMarketer] No new prospects found for emailing.")
@@ -205,19 +242,28 @@ async def process_email_batch(db: AsyncSession, shutdown_event: asyncio.Event):
                 if not active_accounts:
                     print("[EmailMarketer] Ran out of active accounts for this batch.")
                     break # Stop processing this batch if all accounts failed
-                # Cycle through the fetched accounts for this batch
                 account_index = (account_index + 1) % len(active_accounts)
-                current_account_list_index = account_index # Store index in case we need to remove it
+                current_account_list_index = account_index
                 email_account = active_accounts[current_account_list_index]
 
-                # --- Simple Warm-up Delay ---
+                # Check if alias is set, skip account if not (critical for strategy)
+                if not email_account.alias_email:
+                     print(f"[EmailMarketer] Skipping account {email_account.email_address} - alias_email not set.")
+                     # Remove from current batch list to prevent reuse without alias
+                     try:
+                         active_accounts.pop(current_account_list_index)
+                         account_index = current_account_list_index - 1
+                     except IndexError:
+                          account_index = -1
+                     continue # Try next account
+
+                # --- Minimal Warm-up Delay ---
                 warmup_delay = 0
-                # Check emails_sent_today which was reset by get_batch_of_active_accounts if needed
                 if email_account.emails_sent_today < WARMUP_THRESHOLD:
                     warmup_delay = random.uniform(SEND_DELAY_MIN, SEND_DELAY_MAX) * (WARMUP_DELAY_MULTIPLIER - 1)
-                    print(f"[EmailMarketer] Applying warm-up delay ({warmup_delay:.2f}s) for account {email_account.email_address} (Sent today: {email_account.emails_sent_today})")
+                    # print(f"[EmailMarketer] Applying minimal warm-up delay ({warmup_delay:.2f}s) for account {email_account.email_address}")
 
-                # --- Standard Delay ---
+                # --- Aggressive Standard Delay ---
                 standard_delay = random.uniform(SEND_DELAY_MIN, SEND_DELAY_MAX)
                 await asyncio.sleep(standard_delay + warmup_delay)
 
@@ -226,52 +272,45 @@ async def process_email_batch(db: AsyncSession, shutdown_event: asyncio.Event):
                 if not email_content:
                     print(f"[EmailMarketer] Skipping prospect {prospect.prospect_id} due to email generation failure.")
                     prospect_status_update = ("FAILED_GENERATION", None)
-                    # Use continue to skip to the finally block for this prospect
                     continue
 
                 # --- Send Email ---
-                # send_email_via_smtp will raise specific exceptions on failure
                 await send_email_via_smtp(email_content, prospect.contact_email, email_account)
 
                 # --- Handle Success ---
-                print(f"[EmailMarketer] Successfully sent email to {prospect.contact_email} via {email_account.email_address}")
+                print(f"[EmailMarketer] Successfully sent email to {prospect.contact_email} via {email_account.smtp_user} (From: {email_account.alias_email})")
                 prospect_status_update = ("CONTACTED", datetime.datetime.now(datetime.timezone.utc))
                 increment_send_count_for_account_id = email_account.account_id
                 prospects_emailed_count += 1
-                # Increment count in memory for warm-up check in the same batch run
-                email_account.emails_sent_today += 1
+                email_account.emails_sent_today += 1 # Increment memory count
 
             except (aiosmtplib.SMTPAuthenticationError, ValueError) as auth_err: # ValueError for decryption failure
                 print(f"[EmailMarketer] Auth/Setup error for account {email_account.email_address if email_account else 'N/A'}: {auth_err}. Deactivating.")
                 if email_account:
                     account_to_deactivate = (email_account.account_id, f"Auth/Setup Error: {str(auth_err)[:100]}")
-                    # Remove from current batch list to prevent reuse
                     if current_account_list_index != -1:
                          try:
                              active_accounts.pop(current_account_list_index)
-                             # Adjust index for next iteration if needed
-                             account_index = current_account_list_index -1 # Point to previous index before the removed one
+                             account_index = current_account_list_index -1
                          except IndexError:
-                              print(f"[EmailMarketer] Error removing account from active list index {current_account_list_index}")
-                              account_index = -1 # Reset index
-                    # Prospect status remains NEW, will be retried later
+                              account_index = -1
+                # Prospect status remains NEW
 
             except aiosmtplib.SMTPRecipientsRefused as bounce_err:
                 print(f"[EmailMarketer] Hard bounce for {prospect.contact_email}: {bounce_err}. Marking as BOUNCED.")
                 prospect_status_update = ("BOUNCED", None)
                 if email_account: # Still count as sent attempt
                     increment_send_count_for_account_id = email_account.account_id
-                    email_account.emails_sent_today += 1 # Increment memory count
+                    email_account.emails_sent_today += 1
 
-            except (aiosmtplib.SMTPSenderRefused, aiosmtplib.SMTPDataError, smtplib.SMTPException) as smtp_err:
-                # Treat sender refused, data errors, and other SMTP issues as potential account problems or blocks
-                # Check for specific Gmail error codes/messages if known
+            except (aiosmtplib.SMTPSenderRefused, aiosmtplib.SMTPDataError, smtplib.SMTPException, aiosmtplib.SMTPResponseException) as smtp_err:
+                # Treat most SMTP errors as potential account issues
                 error_message = str(smtp_err)
                 deactivate_reason = f"SMTP Send Error: {error_message[:100]}"
                 print(f"[EmailMarketer] SMTP Error for account {email_account.email_address if email_account else 'N/A'} sending to {prospect.contact_email}: {smtp_err}. Deactivating account.")
-                # Example: Check for common Gmail suspension codes/messages
-                # if "Suspended" in error_message or "5.7.0" in error_message:
-                #     deactivate_reason = f"Account Likely Suspended: {error_message[:100]}"
+                # Check for common Gmail suspension/limit codes/messages
+                if "Suspended" in error_message or "5.7.0" in error_message or "421" in error_message or "rate limit" in error_message.lower():
+                    deactivate_reason = f"Account Likely Suspended/Limited: {error_message[:100]}"
 
                 if email_account:
                     account_to_deactivate = (email_account.account_id, deactivate_reason)
@@ -280,21 +319,20 @@ async def process_email_batch(db: AsyncSession, shutdown_event: asyncio.Event):
                              active_accounts.pop(current_account_list_index)
                              account_index = current_account_list_index - 1
                          except IndexError:
-                              print(f"[EmailMarketer] Error removing account from active list index {current_account_list_index}")
-                              account_index = -1 # Reset index
+                              account_index = -1
                 # Prospect status remains NEW
 
             except Exception as e:
                 print(f"[EmailMarketer] Unexpected error processing prospect {prospect.prospect_id}: {e}")
-                # Mark prospect as failed send to avoid retrying immediately
+                import traceback
+                traceback.print_exc()
                 prospect_status_update = ("FAILED_SEND", None)
                 if email_account: # Count as attempt if account was selected
                      increment_send_count_for_account_id = email_account.account_id
-                     email_account.emails_sent_today += 1 # Increment memory count
+                     email_account.emails_sent_today += 1
 
             finally:
                 # --- Database Updates for this Prospect/Account ---
-                # This block executes for each prospect, committing changes individually.
                 try:
                     if account_to_deactivate:
                         await crud.set_email_account_inactive(db, account_to_deactivate[0], account_to_deactivate[1])
@@ -305,7 +343,7 @@ async def process_email_batch(db: AsyncSession, shutdown_event: asyncio.Event):
                     await db.commit() # Commit changes for this prospect/account interaction
                 except Exception as db_e:
                     print(f"[EmailMarketer] CRITICAL: Failed to commit DB updates for prospect {prospect.prospect_id}: {db_e}")
-                    await db.rollback() # Rollback if updates fail
+                    await db.rollback()
 
     except Exception as e:
         print(f"[EmailMarketer] Error in email processing batch: {e}")
