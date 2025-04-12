@@ -8,11 +8,10 @@ import os
 import re
 import traceback
 import logging
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Tuple
 
 from sqlalchemy.ext.asyncio import AsyncSession
 import httpx
-# from lemonsqueezy import LemonSqueezy # Keep if direct LS API calls needed later
 
 # Corrected relative imports for package structure
 try:
@@ -27,13 +26,18 @@ except ImportError:
 
 # Setup logger
 logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO)
+# Ensure logger is configured (e.g., in main.py or here)
+if not logger.hasHandlers():
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+
 
 # --- MCOL Configuration ---
 MCOL_ANALYSIS_INTERVAL_SECONDS = settings.MCOL_ANALYSIS_INTERVAL_SECONDS or 300
 MCOL_IMPLEMENTATION_MODE = settings.MCOL_IMPLEMENTATION_MODE or "SUGGEST"
-WEBSITE_OUTPUT_DIR = "/app/static_website" # Served by FastAPI
+WEBSITE_OUTPUT_DIR = "/app/static_website"
 API_KEY_LOW_THRESHOLD = getattr(settings, 'API_KEY_LOW_THRESHOLD', 5) # Threshold for warning
+PROMPT_TUNING_ENABLED = getattr(settings, 'MCOL_PROMPT_TUNING_ENABLED', True) # Allow disabling prompt tuning suggestions
+MCOL_MAX_STRATEGIES = getattr(settings, 'MCOL_MAX_STRATEGIES', 3) # Max strategies to generate
 
 # --- Core MCOL Functions ---
 
@@ -41,7 +45,6 @@ def format_kpis_for_llm(snapshot: models.KpiSnapshot) -> str:
     """Formats KPI snapshot data into a string for LLM analysis."""
     if not snapshot: return "No KPI data available."
     lines = [f"KPI Snapshot (Timestamp: {snapshot.timestamp}):"]
-    # Use getattr for safe access to potentially new fields
     lines.append(f"- Reports: AwaitingGen={getattr(snapshot, 'awaiting_generation_reports', 0)}, PendingTask={getattr(snapshot, 'pending_reports', 0)}, Processing={getattr(snapshot, 'processing_reports', 0)}, Completed(24h)={getattr(snapshot, 'completed_reports_24h', 0)}, Failed(24h)={getattr(snapshot, 'failed_reports_24h', 0)}, DeliveryFailed(24h)={getattr(snapshot, 'delivery_failed_reports_24h', 0)}, AvgTime={snapshot.avg_report_time_seconds or 0:.2f}s")
     lines.append(f"- Prospecting: New(24h)={getattr(snapshot, 'new_prospects_24h', 0)}")
     lines.append(f"- Email: Sent(24h)={getattr(snapshot, 'emails_sent_24h', 0)}, ActiveAccounts={getattr(snapshot, 'active_email_accounts', 0)}, Deactivated(24h)={getattr(snapshot, 'deactivated_accounts_24h', 0)}, BounceRate(24h)={snapshot.bounce_rate_24h or 0:.2f}%")
@@ -89,7 +92,7 @@ async def generate_solution_strategies(client: httpx.AsyncClient, problem: str, 
     """Uses LLM (Acumenis Prime) to generate potential solution strategies for the identified problem."""
     system_context = f"""
     System: Acumenis Agency. FastAPI, SQLAlchemy, PostgreSQL, Docker. Agents: ReportGenerator, ProspectResearcher, EmailMarketer, KeyAcquirer, MCOL. Core tool: 'open-deep-research'. Payment: Lemon Squeezy (configured). Website: Served via FastAPI static files (target dir: /app/static_website) at {settings.AGENCY_BASE_URL}. Budget: $5/month (data center proxies). Uses free tiers/acquired keys aggressively. Core LLM: Acumenis Prime (You). MCOL Mode: {MCOL_IMPLEMENTATION_MODE}.
-    Code Structure: /app/ contains main.py, agents/, db/, core/, workers/, api/endpoints/. /app/open-deep-research/ contains the external tool. Migrations via Alembic.
+    Code Structure: /app/ contains main.py, agents/, db/, core/, workers/, api/endpoints/. /app/open-deep-research-main/ contains the external tool. Migrations via Alembic.
     """
     prompt = f"""
     Problem Diagnosis:
@@ -98,17 +101,17 @@ async def generate_solution_strategies(client: httpx.AsyncClient, problem: str, 
     - Current KPIs: {kpi_data_str}
     - System Context: {system_context}
 
-    Objective: Generate 2-3 diverse, actionable, and creative strategies to solve the identified problem for Acumenis Agency. Prioritize AI/automation, budget constraints ($5 proxies), and the $10k/72h goal. Since MCOL_IMPLEMENTATION_MODE='{MCOL_IMPLEMENTATION_MODE}', focus on generating *clear, actionable suggestions* for a human operator. If code changes are needed, describe the logic clearly. If prompt tuning is needed, provide example improved prompts.
+    Objective: Generate {MCOL_MAX_STRATEGIES} diverse, actionable, and creative strategies to solve the identified problem for Acumenis Agency. Prioritize AI/automation, budget constraints ($5 proxies), and the $10k/72h goal. Since MCOL_IMPLEMENTATION_MODE='{MCOL_IMPLEMENTATION_MODE}', focus on generating *clear, actionable suggestions* for a human operator. If code changes are needed, describe the logic clearly. If prompt tuning is needed, provide example improved prompts. Consider suggesting experiments (A/B tests) the operator can run.
 
     Instructions:
-    1. Provide 'name' (concise action verb phrase) and 'description' (detailed steps/logic/prompt examples for the operator) for each strategy.
-    2. Specify target files/agents involved.
+    1. Provide 'name' (concise action verb phrase), 'target_files' (list of relevant file paths/agents), and 'description' (detailed steps/logic/prompt examples for the operator) for each strategy.
+    2. Structure the 'description' clearly, outlining the hypothesis (if applicable), the suggested action/experiment, and the expected outcome metric to monitor.
     3. Output ONLY a JSON list of strategy objects.
 
     Example Strategies (Focus on Operator Suggestions):
-    - Problem: "Zero Active API Keys (KeyAcquirer Failure)" -> Strategy: {{"name": "Diagnose & Address KeyAcquirer Failure", "description": "Suggest Operator: 1. Review KeyAcquirer logs (`run_key_acquirer_worker.py`) for specific errors (CAPTCHA, 403, selector failure). 2. If CAPTCHA/IP block: Manually acquire 5-10 OpenRouter keys and add them via a DB script/tool. Update `settings.KEY_ACQUIRER_RUN_ON_STARTUP` to False temporarily. 3. If selector failure: Identify the broken CSS selector on the temp email or OpenRouter site and update the corresponding setting (`TEMP_EMAIL_SELECTOR`, `API_KEY_DISPLAY_SELECTOR`) in `.env` or `config.py`. 4. Verify proxy list (`settings.PROXY_LIST`) contains valid, working data center proxies."}}
-    - Problem: "High Email Bounce Rate (>15%)" -> Strategy: {{"name": "Suggest Email Prompt & Validation Tuning", "description": "Suggest Operator: 1. Review EmailMarketer logs for bounce reasons. 2. Consider integrating a free email validation service (e.g., search 'free email validation api'). Modify `prospect_researcher.py` to call this API after guessing email and update status to 'INVALID_EMAIL' if needed. 3. Suggest A/B testing email subject lines/body prompts. Example improved prompt element: 'Focus less on 'discovered signal', more on direct value prop like 'AI competitor report for [Company] in hours'.' Log suggested prompt variations."}}
-    - Problem: "Zero Orders Created" -> Strategy: {{"name": "Suggest Website CRO Analysis (Multimodal)", "description": "Suggest Operator: 1. Manually test the order flow (`/order` page -> Lemon Squeezy checkout). 2. Verify LS webhook setup. 3. Provide screenshots of `index.html` and `order.html` to Acumenis Prime (me) via a future interface or manual input. I will analyze for CRO issues (clarity, trust, friction) using vision capabilities and provide specific HTML/CSS suggestions."}}
+    - Problem: "Zero Active API Keys (KeyAcquirer Failure)" -> Strategy: {{"name": "Diagnose & Address KeyAcquirer Failure", "target_files": ["app/workers/run_key_acquirer_worker.py", "app/core/config.py"], "description": "**Hypothesis:** KeyAcquirer is blocked by CAPTCHA, IP limits, or changed selectors.\n**Suggested Action:** 1. Review KeyAcquirer logs for specific errors (CAPTCHA, 403, selector failure). 2. If CAPTCHA/IP block: Manually acquire 5-10 OpenRouter keys and add via DB. Update `KEY_ACQUIRER_RUN_ON_STARTUP=False` in `.env`. 3. If selector failure: Identify broken CSS selector and update corresponding setting in `.env`. 4. Verify `PROXY_LIST` in `.env`.\n**Expected Outcome Metric:** Increase in `active_api_keys` KPI."}}
+    - Problem: "High Email Bounce Rate (>15%)" -> Strategy: {{"name": "Test Email Validation & Prompt Variations", "target_files": ["app/agents/prospect_researcher.py", "app/agents/email_marketer.py"], "description": "**Hypothesis:** High bounce rate due to invalid guessed emails OR overly aggressive email content triggering spam filters.\n**Suggested Action/Experiment:** 1. (Validation) Enable `EMAIL_VALIDATION_ENABLED=True` in `.env` and configure a free validation service API URL/Key. Monitor `bounce_rate_24h`. 2. (Prompt Test) Suggest Operator modify `email_marketer.py` `generate_personalized_email` prompt to test a less aggressive variant (e.g., focus on value prop first). Run for 24h and compare `orders_created_24h` / `revenue_24h` against baseline.\n**Expected Outcome Metric:** Reduction in `bounce_rate_24h` (for validation) OR increase in `orders_created_24h` (for prompt test)."}}
+    - Problem: "Zero Orders Created" -> Strategy: {{"name": "Suggest Website CRO Analysis (Multimodal)", "target_files": ["app/static_website/index.html", "app/static_website/order.html"], "description": "**Hypothesis:** Website friction or unclear value proposition prevents order completion.\n**Suggested Action:** 1. Operator manually test order flow. 2. Verify LS webhook. 3. Operator provide screenshots of `index.html` and `order.html` for Acumenis Prime analysis. I will provide specific HTML/CSS CRO suggestions based on visual layout and content clarity.\n**Expected Outcome Metric:** Increase in `orders_created_24h`."}}
     """
     logger.info(f"[MCOL] Generating strategies for problem: {problem}")
     llm_response = await call_llm_api(client, prompt, model="google/gemini-1.5-pro-latest") # Use capable model
@@ -119,20 +122,21 @@ async def generate_solution_strategies(client: httpx.AsyncClient, problem: str, 
         elif isinstance(llm_response.get("strategies"), list): strategies = llm_response["strategies"]
         elif isinstance(llm_response.get("raw_inference"), str):
             try:
-                # Attempt to clean and parse JSON from raw inference
                 raw_inf = llm_response["raw_inference"]
-                json_match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", raw_inf, re.IGNORECASE | re.DOTALL)
+                json_match = re.search(r"```(?:json)?\s*(\[[\s\S]*?\])\s*```", raw_inf, re.IGNORECASE | re.DOTALL)
                 json_str = json_match.group(1).strip() if json_match else raw_inf.strip()
-                # Further clean potential leading/trailing non-JSON chars
                 json_str = json_str[json_str.find('['):json_str.rfind(']')+1]
                 parsed_raw = json.loads(json_str)
                 if isinstance(parsed_raw, list): strategies = parsed_raw
-            except (json.JSONDecodeError, AttributeError) as parse_e:
+            except (json.JSONDecodeError, AttributeError, IndexError) as parse_e:
                 logger.error(f"[MCOL] LLM raw inference is not valid JSON list. Error: {parse_e}. Response: {raw_inf[:500]}...")
 
     if strategies and all(isinstance(s, dict) and "name" in s and "description" in s for s in strategies):
+        # Ensure target_files exists, default to empty list if missing
+        for strat in strategies:
+            strat["target_files"] = strat.get("target_files", [])
         logger.info(f"[MCOL] LLM generated {len(strategies)} strategies.")
-        return strategies
+        return strategies[:MCOL_MAX_STRATEGIES] # Limit number of strategies
     else:
         logger.error(f"[MCOL] Failed to get valid strategies from LLM. Response: {llm_response}")
         return None
@@ -140,33 +144,37 @@ async def generate_solution_strategies(client: httpx.AsyncClient, problem: str, 
 def choose_strategy(strategies: List[Dict[str, str]]) -> Optional[Dict[str, str]]:
     """Selects the best strategy (simple: pick the first one for now)."""
     if not strategies: return None
-    # Future enhancement: Could use LLM to rank strategies based on feasibility/impact/cost.
+    # Future: Implement LLM-based ranking or heuristic selection based on feasibility/impact.
     chosen = strategies[0]
     logger.info(f"[MCOL] Choosing strategy: {chosen['name']}")
     return chosen
 
-async def implement_strategy(client: httpx.AsyncClient, strategy: Dict[str, str]) -> Dict[str, Any]:
-    """Formats the chosen strategy as a suggestion for the operator."""
-    action_details = {"name": strategy["name"], "description": strategy["description"]}
-    strategy_name = strategy.get("name", "Unknown Strategy")
-    strategy_desc = strategy.get("description", "No description provided.")
+async def implement_strategy(client: httpx.AsyncClient, strategy: Dict[str, str], problem: str) -> Dict[str, Any]:
+    """Formats the chosen strategy as a suggestion for the operator, including context."""
+    action_details = {
+        "name": strategy.get("name", "Unknown Strategy"),
+        "description": strategy.get("description", "No description provided."),
+        "target_files": strategy.get("target_files", [])
+    }
+    strategy_name = action_details["name"]
+    strategy_desc = action_details["description"]
+    target_files_str = ", ".join(action_details["target_files"]) if action_details["target_files"] else "N/A"
 
     logger.info(f"[MCOL] Processing strategy (Suggest Mode): {strategy_name}")
 
     # Format the suggestion clearly for the operator log
+    # Using Markdown for better readability in logs or potential UI display
     suggestion_output = f"""
-    **MCOL Suggestion for Operator**
+**MCOL Suggestion for Operator**
 
-    **Strategy:** {strategy_name}
+*   **Priority Problem:** {problem}
+*   **Chosen Strategy:** {strategy_name}
+*   **Target Files/Agents:** `{target_files_str}`
 
-    **Problem Context:** (Inferred from previous MCOL step - add if available)
+**Suggested Action/Analysis:**
 
-    **Suggested Action/Analysis:**
-    {strategy_desc}
-    """
+"""
 
-    # Log the suggestion
-    # The actual logging to DB happens in the main cycle using this result
     implementation_result = {
         "status": "SUGGESTED",
         "result": suggestion_output.strip() # Store the formatted suggestion
@@ -180,16 +188,26 @@ async def implement_strategy(client: httpx.AsyncClient, strategy: Dict[str, str]
     }
 
 async def check_api_key_status(db: AsyncSession) -> Optional[Dict[str, Any]]:
-    """Checks the status of API keys and returns a suggestion if low."""
+    """Checks the status of API keys and returns a structured suggestion if low."""
     try:
+        # Use the specific CRUD function to count active keys
         active_keys_count = await crud.count_active_api_keys(db, provider=settings.LLM_PROVIDER or "openrouter")
         logger.info(f"[MCOL] Active API Keys Check: Found {active_keys_count} active keys.")
+
         if active_keys_count < API_KEY_LOW_THRESHOLD:
             problem = f"Low Active API Keys ({active_keys_count} < {API_KEY_LOW_THRESHOLD})"
-            reasoning = "Insufficient active API keys risk halting all LLM-dependent operations (MCOL, Prospecting, Marketing, Reporting)."
-            strategy_desc = f"Suggest Operator: 1. Manually acquire {API_KEY_LOW_THRESHOLD - active_keys_count + 5} new OpenRouter API keys. 2. Add keys via DB script/tool. 3. Consider running the KeyAcquirer worker (`/control/start/key_acquirer`) if automated acquisition was previously successful, but monitor its logs closely for failures (CAPTCHA/blocks)."
-            strategy = {"name": "Address Low API Key Count", "description": strategy_desc}
-            suggestion = await implement_strategy(None, strategy) # No client needed for suggestion formatting
+            reasoning = "Insufficient active API keys risk halting all LLM-dependent operations."
+            strategy_desc = (
+                f"**Hypothesis:** KeyAcquirer may be failing or keys are being rapidly deactivated.\n"
+                f"**Suggested Action:**\n"
+                f"1. **Diagnose KeyAcquirer:** Review `run_key_acquirer_worker.py` logs for recent errors (CAPTCHA, 403, etc.).\n"
+                f"2. **Manual Intervention (if blocked/urgent):** Manually acquire ~{API_KEY_LOW_THRESHOLD - active_keys_count + 5} new OpenRouter keys and add via DB tool/script. Consider setting `KEY_ACQUIRER_RUN_ON_STARTUP=False` in `.env` if automation is clearly blocked.\n"
+                f"3. **Run KeyAcquirer (if potentially viable):** If logs show only transient errors, try starting the worker via `/control/start/key_acquirer`. Monitor its logs closely.\n"
+                f"**Expected Outcome Metric:** `active_api_keys` KPI increases above {API_KEY_LOW_THRESHOLD}."
+            )
+            strategy = {"name": "Address Low API Key Count", "description": strategy_desc, "target_files": ["app/workers/run_key_acquirer_worker.py", "Database: api_keys table", ".env"]}
+            # Pass the identified problem to implement_strategy for context
+            suggestion = await implement_strategy(None, strategy, problem)
             return {
                 "problem": problem,
                 "reasoning": reasoning,
@@ -208,19 +226,18 @@ async def run_mcol_cycle(db: AsyncSession, shutdown_event: asyncio.Event):
     client: Optional[httpx.AsyncClient] = None
     current_snapshot: Optional[models.KpiSnapshot] = None
     decision_log_id: Optional[int] = None
-    suggestion_to_log = None
 
     try:
         # 0. Pre-Cycle Check: API Key Status (High Priority)
-        key_status_suggestion = await check_api_key_status(db)
-        if key_status_suggestion:
-            logger.warning(f"[MCOL] Priority Issue Detected: {key_status_suggestion['problem']}")
-            suggestion_to_log = key_status_suggestion['suggestion']
+        key_status_suggestion_info = await check_api_key_status(db)
+        if key_status_suggestion_info:
+            logger.warning(f"[MCOL] Priority Issue Detected: {key_status_suggestion_info['problem']}")
+            suggestion_to_log = key_status_suggestion_info['suggestion']
             # Log this critical suggestion immediately
             decision = await crud.log_mcol_decision(
                 db, kpi_snapshot_id=None, # No full KPI cycle run yet
-                priority_problem=key_status_suggestion["problem"],
-                analysis_summary=key_status_suggestion["reasoning"],
+                priority_problem=key_status_suggestion_info["problem"],
+                analysis_summary=key_status_suggestion_info["reasoning"],
                 chosen_action=suggestion_to_log['parameters']['name'],
                 action_status=suggestion_to_log['status'],
                 action_result=suggestion_to_log['result'],
@@ -228,7 +245,6 @@ async def run_mcol_cycle(db: AsyncSession, shutdown_event: asyncio.Event):
             )
             await db.commit()
             logger.info(f"[MCOL] Logged critical API key suggestion (Log ID: {decision.log_id}). Proceeding to main cycle.")
-            # Continue to main cycle, but this critical suggestion is logged.
 
         # 1. Monitor: Create KPI Snapshot
         current_snapshot = await crud.create_kpi_snapshot(db)
@@ -262,31 +278,31 @@ async def run_mcol_cycle(db: AsyncSession, shutdown_event: asyncio.Event):
             if client: await client.aclose()
             return
 
-        await crud.update_mcol_decision_log(db, decision_log_id, generated_strategy=strategies)
+        # Store strategies as JSON string in the log
+        await crud.update_mcol_decision_log(db, decision_log_id, generated_strategy=json.dumps(strategies))
         await db.commit() # Commit generated strategies
 
         # 4. Choose Strategy
         chosen_strategy = choose_strategy(strategies)
         if not chosen_strategy:
-             # Should not happen if strategies were generated, but handle defensively
-             await crud.update_mcol_decision_log(db, decision_log_id, action_status='FAILED_STRATEGY', action_result="Strategy list was empty after generation.")
+             await crud.update_mcol_decision_log(db, decision_log_id, action_status='FAILED_STRATEGY', action_result="Strategy choice failed.")
              await db.commit()
-             logger.error("[MCOL] Strategy list empty after generation. Ending cycle.")
+             logger.error("[MCOL] Strategy choice failed unexpectedly. Ending cycle.")
              if client: await client.aclose()
              return
 
         await crud.update_mcol_decision_log(db, decision_log_id, chosen_action=chosen_strategy['name'])
         await db.commit() # Commit chosen strategy
 
-        # 5. Implement (Suggest Mode)
-        implementation_result = await implement_strategy(client, chosen_strategy)
+        # 5. Implement (Suggest Mode) - Pass the original problem context
+        implementation_result = await implement_strategy(client, chosen_strategy, analysis["problem"])
 
         # Update the log with the final suggestion/outcome
         await crud.update_mcol_decision_log(
             db, decision_log_id,
             action_status=implementation_result["status"],
             action_result=implementation_result["result"],
-            action_parameters=implementation_result.get("parameters")
+            action_parameters=implementation_result.get("parameters") # Store strategy details
         )
         await db.commit() # Commit final outcome
 
@@ -296,12 +312,11 @@ async def run_mcol_cycle(db: AsyncSession, shutdown_event: asyncio.Event):
         logger.error(f"[MCOL] CRITICAL Error during MCOL cycle: {e}", exc_info=True)
         if decision_log_id:
             try:
-                # Attempt to log the cycle failure to the existing log entry
-                await crud.update_mcol_decision_log(db, decision_log_id, action_status='FAILED_CYCLE', action_result=f"Cycle error: {traceback.format_exc(limit=500)}")
+                await crud.update_mcol_decision_log(db, decision_log_id, action_status='FAILED_CYCLE', action_result=f"Cycle error: {traceback.format_exc(limit=1000)}") # Longer limit for traceback
                 await db.commit()
             except Exception as db_err:
                  logger.error(f"[MCOL] Failed to log cycle error to DB: {db_err}")
-                 await db.rollback() # Rollback if logging the error fails
+                 await db.rollback()
         else:
              # If no decision log entry was even created
              await db.rollback()
