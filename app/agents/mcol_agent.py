@@ -1,24 +1,39 @@
+
+# autonomous_agency/app/agents/mcol_agent.py
 import asyncio
 import json
 import datetime
 import subprocess
 import os
 import re
+import traceback
+import logging
 from typing import Optional, List, Dict, Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 import httpx
-from lemonsqueezy import LemonSqueezy
+# from lemonsqueezy import LemonSqueezy # Keep if direct LS API calls needed later
 
 # Corrected relative imports for package structure
-from Acumenis.app.core.config import settings
-from Acumenis.app.db import crud, models
-from Acumenis.app.agents.agent_utils import get_httpx_client, call_llm_api
+try:
+    from Acumenis.app.core.config import settings
+    from Acumenis.app.db import crud, models
+    from Acumenis.app.agents.agent_utils import get_httpx_client, call_llm_api
+except ImportError:
+    print("[MCOL Agent] WARNING: Using fallback imports. Ensure package structure is correct for deployment.")
+    from app.core.config import settings
+    from app.db import crud, models
+    from app.agents.agent_utils import get_httpx_client, call_llm_api
+
+# Setup logger
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
 
 # --- MCOL Configuration ---
-MCOL_ANALYSIS_INTERVAL_SECONDS = settings.MCOL_ANALYSIS_INTERVAL_SECONDS
-MCOL_IMPLEMENTATION_MODE = settings.MCOL_IMPLEMENTATION_MODE
+MCOL_ANALYSIS_INTERVAL_SECONDS = settings.MCOL_ANALYSIS_INTERVAL_SECONDS or 300
+MCOL_IMPLEMENTATION_MODE = settings.MCOL_IMPLEMENTATION_MODE or "SUGGEST"
 WEBSITE_OUTPUT_DIR = "/app/static_website" # Served by FastAPI
+API_KEY_LOW_THRESHOLD = getattr(settings, 'API_KEY_LOW_THRESHOLD', 5) # Threshold for warning
 
 # --- Core MCOL Functions ---
 
@@ -26,17 +41,19 @@ def format_kpis_for_llm(snapshot: models.KpiSnapshot) -> str:
     """Formats KPI snapshot data into a string for LLM analysis."""
     if not snapshot: return "No KPI data available."
     lines = [f"KPI Snapshot (Timestamp: {snapshot.timestamp}):"]
-    lines.append(f"- Reports: AwaitingPayment={snapshot.awaiting_payment_reports}, Pending={snapshot.pending_reports}, Processing={snapshot.processing_reports}, Completed(24h)={snapshot.completed_reports_24h}, Failed(24h)={snapshot.failed_reports_24h}, AvgTime={snapshot.avg_report_time_seconds or 0:.2f}s")
-    lines.append(f"- Prospecting: New(24h)={snapshot.new_prospects_24h}")
-    lines.append(f"- Email: Sent(24h)={snapshot.emails_sent_24h}, ActiveAccounts={snapshot.active_email_accounts}, Deactivated(24h)={snapshot.deactivated_accounts_24h}, BounceRate(24h)={snapshot.bounce_rate_24h or 0:.2f}%")
-    lines.append(f"- Revenue: Orders(24h)={snapshot.orders_created_24h}, Revenue(24h)=${snapshot.revenue_24h:.2f}")
+    # Use getattr for safe access to potentially new fields
+    lines.append(f"- Reports: AwaitingGen={getattr(snapshot, 'awaiting_generation_reports', 0)}, PendingTask={getattr(snapshot, 'pending_reports', 0)}, Processing={getattr(snapshot, 'processing_reports', 0)}, Completed(24h)={getattr(snapshot, 'completed_reports_24h', 0)}, Failed(24h)={getattr(snapshot, 'failed_reports_24h', 0)}, DeliveryFailed(24h)={getattr(snapshot, 'delivery_failed_reports_24h', 0)}, AvgTime={snapshot.avg_report_time_seconds or 0:.2f}s")
+    lines.append(f"- Prospecting: New(24h)={getattr(snapshot, 'new_prospects_24h', 0)}")
+    lines.append(f"- Email: Sent(24h)={getattr(snapshot, 'emails_sent_24h', 0)}, ActiveAccounts={getattr(snapshot, 'active_email_accounts', 0)}, Deactivated(24h)={getattr(snapshot, 'deactivated_accounts_24h', 0)}, BounceRate(24h)={snapshot.bounce_rate_24h or 0:.2f}%")
+    lines.append(f"- Revenue: Orders(24h)={getattr(snapshot, 'orders_created_24h', 0)}, Revenue(24h)=${snapshot.revenue_24h:.2f}")
+    lines.append(f"- API Keys: Active={getattr(snapshot, 'active_api_keys', 0)}, Deactivated(24h)={getattr(snapshot, 'deactivated_api_keys_24h', 0)}")
     return "\n".join(lines)
 
 async def analyze_performance_and_prioritize(client: httpx.AsyncClient, kpi_data_str: str) -> Optional[Dict[str, str]]:
-    """Uses LLM to analyze KPIs, identify the biggest problem, and explain why."""
+    """Uses LLM (Acumenis Prime) to analyze KPIs, identify the biggest problem, and explain why."""
     primary_goal = "Achieve $10,000 revenue within 72 hours, then sustain growth via AI report sales ($499/$999) and autonomous client acquisition."
     system_context = f"""
-    System Overview: Autonomous agency 'Acumenis' using FastAPI, SQLAlchemy, PostgreSQL. Agents: ReportGenerator (uses 'open-deep-research', delivers via email), ProspectResearcher (signal-based, LLM inference), EmailMarketer (LLM personalized emails, SMTP rotation), MCOL (self-improvement). Deployed via Docker at {settings.AGENCY_BASE_URL}. Payment via Lemon Squeezy (checkout links + webhook). Website serving via FastAPI static files.
+    System Overview: Autonomous agency 'Acumenis' using FastAPI, SQLAlchemy, PostgreSQL. Agents: ReportGenerator (uses 'open-deep-research', delivers via email), ProspectResearcher (signal-based, LLM inference), EmailMarketer (LLM personalized emails, SMTP rotation), KeyAcquirer (automated key scraping - HIGH RISK), MCOL (self-improvement analysis). Deployed via Docker at {settings.AGENCY_BASE_URL}. Payment via Lemon Squeezy. Website serving via FastAPI static files. Core LLM: Acumenis Prime (You).
     """
     prompt = f"""
     Analyze the following system performance data for Acumenis, an autonomous AI reporting agency aiming for $10k/72h.
@@ -46,33 +63,33 @@ async def analyze_performance_and_prioritize(client: httpx.AsyncClient, kpi_data
     {kpi_data_str}
 
     Instructions:
-    1. Identify the single MOST CRITICAL bottleneck currently preventing the achievement of the primary goal ($10k in 72h). Consider the entire funnel: Prospecting -> Email Outreach -> Website Visit -> Order Attempt -> Payment Success -> Report Generation -> Delivery. Look at KPIs like Orders(24h), Revenue(24h), New Prospects, Email Sent/Bounce Rate, Pending Reports.
+    1. Identify the single MOST CRITICAL bottleneck currently preventing the achievement of the primary goal ($10k in 72h). Consider the entire funnel: Key Acquisition -> Prospecting -> Email Outreach -> Website Visit -> Order Attempt -> Payment Success -> Report Generation -> Delivery. Look for zero values or critical failures (e.g., Active API Keys=0, Orders=0, High Bounce Rate).
     2. Briefly explain the reasoning for selecting this problem (impact on revenue/growth).
     3. Respond ONLY with a JSON object containing "problem" and "reasoning".
-    Example Problems: "No Website Generated Yet", "Zero Orders Created (Website/Payment Issue?)", "Low Prospect Acquisition Rate", "High Email Bounce Rate (>20%)", "Payment Webhook Not Triggering Report Creation", "Report Generation Failing Frequently".
+    Example Problems: "Zero Active API Keys (KeyAcquirer Failure)", "Zero Orders Created (Website/Payment Issue?)", "Low Prospect Acquisition Rate", "High Email Bounce Rate (>20%)", "Payment Webhook Not Triggering Report Creation", "Report Generation Failing Frequently".
     If Revenue(24h) is significantly positive and growing, identify the next major bottleneck to scaling. If all looks optimal, respond: {{"problem": "None", "reasoning": "Current KPIs indicate strong progress towards goal."}}
     """
-    print("[MCOL] Analyzing KPIs with LLM...")
-    llm_response = await call_llm_api(client, prompt)
+    logger.info("[MCOL] Analyzing KPIs with LLM...")
+    llm_response = await call_llm_api(client, prompt, model="google/gemini-1.5-pro-latest") # Use a capable model
 
     if llm_response and isinstance(llm_response, dict) and "problem" in llm_response and "reasoning" in llm_response:
         problem = llm_response["problem"].strip()
         reasoning = llm_response["reasoning"].strip()
-        if problem != "None":
-            print(f"[MCOL] Identified Priority Problem: {problem} (Reason: {reasoning})")
+        if problem and problem.lower() != "none":
+            logger.info(f"[MCOL] Identified Priority Problem: {problem} (Reason: {reasoning})")
             return {"problem": problem, "reasoning": reasoning}
         else:
-            print("[MCOL] LLM analysis indicates no critical problems currently, or goal is being met.")
+            logger.info("[MCOL] LLM analysis indicates no critical problems currently, or goal is being met.")
             return None
     else:
-        print("[MCOL] Failed to get valid analysis from LLM.")
+        logger.error(f"[MCOL] Failed to get valid analysis from LLM. Response: {llm_response}")
         return None
 
 async def generate_solution_strategies(client: httpx.AsyncClient, problem: str, reasoning: str, kpi_data_str: str) -> Optional[List[Dict[str, str]]]:
-    """Uses LLM to generate potential solution strategies for the identified problem."""
+    """Uses LLM (Acumenis Prime) to generate potential solution strategies for the identified problem."""
     system_context = f"""
-    System: Acumenis Agency. FastAPI, SQLAlchemy, PostgreSQL, Docker. Agents: ReportGenerator, ProspectResearcher, EmailMarketer, MCOL. Core tool: 'open-deep-research'. Payment: Lemon Squeezy (API Key, Variant IDs, Webhook Secret configured). Website: Served via FastAPI static files (target dir: /app/static_website) at {settings.AGENCY_BASE_URL}. Budget: $10/month (proxies). Uses free tiers aggressively.
-    Code Structure: /app/Acumenis/app/ contains main.py, agents/, db/, core/, workers/, api/endpoints/. /app/open-deep-research/ contains the external tool. Migrations via Alembic. Static website files go in /app/static_website.
+    System: Acumenis Agency. FastAPI, SQLAlchemy, PostgreSQL, Docker. Agents: ReportGenerator, ProspectResearcher, EmailMarketer, KeyAcquirer, MCOL. Core tool: 'open-deep-research'. Payment: Lemon Squeezy (configured). Website: Served via FastAPI static files (target dir: /app/static_website) at {settings.AGENCY_BASE_URL}. Budget: $5/month (data center proxies). Uses free tiers/acquired keys aggressively. Core LLM: Acumenis Prime (You). MCOL Mode: {MCOL_IMPLEMENTATION_MODE}.
+    Code Structure: /app/ contains main.py, agents/, db/, core/, workers/, api/endpoints/. /app/open-deep-research/ contains the external tool. Migrations via Alembic.
     """
     prompt = f"""
     Problem Diagnosis:
@@ -81,24 +98,20 @@ async def generate_solution_strategies(client: httpx.AsyncClient, problem: str, 
     - Current KPIs: {kpi_data_str}
     - System Context: {system_context}
 
-    Objective: Generate 2-3 diverse, actionable, and creative strategies to solve the identified problem for Acumenis Agency. Prioritize AI/automation, Lemon Squeezy integration, budget constraints, and the $10k/72h goal. Incorporate rule-bending, algorithm-aware tactics.
+    Objective: Generate 2-3 diverse, actionable, and creative strategies to solve the identified problem for Acumenis Agency. Prioritize AI/automation, budget constraints ($5 proxies), and the $10k/72h goal. Since MCOL_IMPLEMENTATION_MODE='{MCOL_IMPLEMENTATION_MODE}', focus on generating *clear, actionable suggestions* for a human operator. If code changes are needed, describe the logic clearly. If prompt tuning is needed, provide example improved prompts.
 
     Instructions:
-    1. Provide 'name' and detailed 'description' for each strategy.
-    2. Specify target files and changes if code generation/modification is needed.
-    3. State any required manual interactions clearly.
-    4. Output ONLY a JSON list of strategy objects.
+    1. Provide 'name' (concise action verb phrase) and 'description' (detailed steps/logic/prompt examples for the operator) for each strategy.
+    2. Specify target files/agents involved.
+    3. Output ONLY a JSON list of strategy objects.
 
-    Example Strategies (Refined & Aggressive):
-    - Problem: "No Website Generated Yet" -> Strategy: {{"name": "Generate Multi-Page Website v1", "description": "Use LLM (Gemini 2.5 Pro) to generate 3 HTML files: `index.html` (Hero, How it Works, Features, Pricing Teaser, Testimonials, CTA), `pricing.html` (Detailed comparison table, FAQs, CTAs), `order.html` (Focused order form). Ensure consistent navigation, professional design (embedded CSS), SEO optimization (keywords: AI research reports, market analysis, competitor intelligence, Acumenis), and conversion focus. Order form JS on `order.html` POSTs to `/api/v1/payments/create-checkout` and redirects. Save files to `/app/static_website/`."}}
-    - Problem: "Zero Orders Created" -> Strategy: {{"name": "Aggressive CRO & Payment Debug", "description": "1. Verify website files exist and JS POSTs correctly to payment endpoint. 2. Check payment endpoint logs. 3. Use LLM to analyze generated website HTML/JS for conversion bottlenecks (CTA clarity, trust signals, speed). 4. Suggest A/B tests for headlines/pricing (MCOL logs). 5. Ensure LS Variant IDs are correct. 6. Suggest manual test purchase."}}
-    - Problem: "Payment Webhook Not Triggering Report Creation" -> Strategy: {{"name": "Debug Payment Webhook & DB Insertion", "description": "1. Verify LS webhook points to `{settings.AGENCY_BASE_URL}/api/v1/payments/webhook`. 2. Check `payments.py -> lemon_squeezy_webhook` logs for signature/processing errors. 3. Ensure webhook secret matches. 4. Verify `crud.py -> create_report_request_from_webhook` parses payload/custom data and inserts with 'PENDING' status. Check DB logs."}}
-    - Problem: "Low Prospect Acquisition Rate" -> Strategy: {{"name": "Hyper-Targeted LinkedIn Outreach Prep", "description": "Modify 'ProspectResearcher': Use LLM to identify 2-3 specific, high-ranking executives (CEO, VP Marketing, Head of Strategy) at companies identified via signals. Store names/titles/LinkedIn URLs (if findable) in `Prospect` table. MCOL Action: Log detailed suggestions for manual operator: 'Connect with [Name, Title] at [Company] on LinkedIn. Reference [Specific Signal/Pain Point]. Suggest discussing how Acumenis rapid AI reports address [Benefit].'"}}
-    - Problem: "High Email Bounce Rate (>15%)" -> Strategy: {{"name": "Integrate Free Email Validation & Aggressive List Pruning", "description": "Research free tier email validation APIs. Use LLM to generate code modification for 'EmailMarketer -> process_email_batch' to call the API before `generate_personalized_email`. If invalid, update prospect status to 'INVALID_EMAIL' and skip. Requires adding API key to .env."}}
-    - Problem: "Low Website Traffic/SEO Ranking" -> Strategy: {{"name": "AI-Driven SEO Content & Signal Boost", "description": "Use LLM (Gemini 2.5 Pro) to generate 2-3 high-quality blog posts relevant to 'AI market research', 'competitive analysis tools', 'Acumenis reports'. Save as HTML in `/app/static_website/blog/`. Modify website HTML to link to them. MCOL Action: Simulate social sharing/backlinks by prompting LLM to generate realistic-sounding forum posts/comments mentioning Acumenis/blog posts (log these for potential manual posting)."}}
+    Example Strategies (Focus on Operator Suggestions):
+    - Problem: "Zero Active API Keys (KeyAcquirer Failure)" -> Strategy: {{"name": "Diagnose & Address KeyAcquirer Failure", "description": "Suggest Operator: 1. Review KeyAcquirer logs (`run_key_acquirer_worker.py`) for specific errors (CAPTCHA, 403, selector failure). 2. If CAPTCHA/IP block: Manually acquire 5-10 OpenRouter keys and add them via a DB script/tool. Update `settings.KEY_ACQUIRER_RUN_ON_STARTUP` to False temporarily. 3. If selector failure: Identify the broken CSS selector on the temp email or OpenRouter site and update the corresponding setting (`TEMP_EMAIL_SELECTOR`, `API_KEY_DISPLAY_SELECTOR`) in `.env` or `config.py`. 4. Verify proxy list (`settings.PROXY_LIST`) contains valid, working data center proxies."}}
+    - Problem: "High Email Bounce Rate (>15%)" -> Strategy: {{"name": "Suggest Email Prompt & Validation Tuning", "description": "Suggest Operator: 1. Review EmailMarketer logs for bounce reasons. 2. Consider integrating a free email validation service (e.g., search 'free email validation api'). Modify `prospect_researcher.py` to call this API after guessing email and update status to 'INVALID_EMAIL' if needed. 3. Suggest A/B testing email subject lines/body prompts. Example improved prompt element: 'Focus less on 'discovered signal', more on direct value prop like 'AI competitor report for [Company] in hours'.' Log suggested prompt variations."}}
+    - Problem: "Zero Orders Created" -> Strategy: {{"name": "Suggest Website CRO Analysis (Multimodal)", "description": "Suggest Operator: 1. Manually test the order flow (`/order` page -> Lemon Squeezy checkout). 2. Verify LS webhook setup. 3. Provide screenshots of `index.html` and `order.html` to Acumenis Prime (me) via a future interface or manual input. I will analyze for CRO issues (clarity, trust, friction) using vision capabilities and provide specific HTML/CSS suggestions."}}
     """
-    print(f"[MCOL] Generating strategies for problem: {problem}")
-    llm_response = await call_llm_api(client, prompt, model="google/gemini-1.5-pro-latest")
+    logger.info(f"[MCOL] Generating strategies for problem: {problem}")
+    llm_response = await call_llm_api(client, prompt, model="google/gemini-1.5-pro-latest") # Use capable model
 
     strategies = None
     if llm_response:
@@ -106,191 +119,191 @@ async def generate_solution_strategies(client: httpx.AsyncClient, problem: str, 
         elif isinstance(llm_response.get("strategies"), list): strategies = llm_response["strategies"]
         elif isinstance(llm_response.get("raw_inference"), str):
             try:
-                cleaned = llm_response["raw_inference"].strip().replace("```json", "").replace("```", "").strip()
-                parsed_raw = json.loads(cleaned)
+                # Attempt to clean and parse JSON from raw inference
+                raw_inf = llm_response["raw_inference"]
+                json_match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", raw_inf, re.IGNORECASE | re.DOTALL)
+                json_str = json_match.group(1).strip() if json_match else raw_inf.strip()
+                # Further clean potential leading/trailing non-JSON chars
+                json_str = json_str[json_str.find('['):json_str.rfind(']')+1]
+                parsed_raw = json.loads(json_str)
                 if isinstance(parsed_raw, list): strategies = parsed_raw
-            except json.JSONDecodeError: print("[MCOL] LLM raw inference is not valid JSON list.")
+            except (json.JSONDecodeError, AttributeError) as parse_e:
+                logger.error(f"[MCOL] LLM raw inference is not valid JSON list. Error: {parse_e}. Response: {raw_inf[:500]}...")
 
     if strategies and all(isinstance(s, dict) and "name" in s and "description" in s for s in strategies):
-        print(f"[MCOL] LLM generated {len(strategies)} strategies.")
+        logger.info(f"[MCOL] LLM generated {len(strategies)} strategies.")
         return strategies
     else:
-        print(f"[MCOL] Failed to get valid strategies from LLM. Response: {llm_response}")
+        logger.error(f"[MCOL] Failed to get valid strategies from LLM. Response: {llm_response}")
         return None
 
 def choose_strategy(strategies: List[Dict[str, str]]) -> Optional[Dict[str, str]]:
-    """Selects the best strategy (simple: pick the first one)."""
+    """Selects the best strategy (simple: pick the first one for now)."""
     if not strategies: return None
-    print(f"[MCOL] Choosing strategy: {strategies[0]['name']}")
-    return strategies[0]
+    # Future enhancement: Could use LLM to rank strategies based on feasibility/impact/cost.
+    chosen = strategies[0]
+    logger.info(f"[MCOL] Choosing strategy: {chosen['name']}")
+    return chosen
 
 async def implement_strategy(client: httpx.AsyncClient, strategy: Dict[str, str]) -> Dict[str, Any]:
-    """Attempts to implement the chosen strategy by generating/modifying code or suggesting actions."""
+    """Formats the chosen strategy as a suggestion for the operator."""
     action_details = {"name": strategy["name"], "description": strategy["description"]}
-    print(f"[MCOL] Processing strategy: {strategy['name']}")
-    strategy_name = strategy.get("name", "").lower()
+    strategy_name = strategy.get("name", "Unknown Strategy")
+    strategy_desc = strategy.get("description", "No description provided.")
 
-    # --- Define Implementation Logic per Strategy ---
-    # Note: Website generation is removed as per instructions.
+    logger.info(f"[MCOL] Processing strategy (Suggest Mode): {strategy_name}")
 
-    async def analyze_website_conversion():
-        """Placeholder: Reads website files and asks LLM for conversion improvements."""
-        print("[MCOL] Attempting to analyze existing website files for conversion...")
-        results = []
-        files_to_analyze = ["index.html", "order.html"] # Focus on key pages
-        for filename in files_to_analyze:
-            filepath = os.path.join(WEBSITE_OUTPUT_DIR, filename)
-            if os.path.exists(filepath):
-                try:
-                    with open(filepath, "r", encoding="utf-8") as f:
-                        content = f.read()
-                    analysis_prompt = f"""
-                    Analyze the following HTML/JS content from the '{filename}' page of the Acumenis website.
-                    Identify potential conversion rate optimization (CRO) bottlenecks.
-                    Suggest 2-3 specific, actionable improvements focusing on clarity, call-to-action effectiveness, trust signals, and reducing friction.
-                    Keep suggestions concise. Output suggestions as a bulleted list.
+    # Format the suggestion clearly for the operator log
+    suggestion_output = f"""
+    **MCOL Suggestion for Operator**
 
-                    HTML/JS Content:
-                    ```html
-                    {content[:5000]}
-                    ```
-                    """ # Limit content length sent to LLM
-                    llm_response = await call_llm_api(client, analysis_prompt, model="google/gemini-1.5-flash-latest") # Use fast model
-                    if llm_response and isinstance(llm_response.get("raw_inference"), str):
-                        results.append(f"Analysis for {filename}:\n{llm_response['raw_inference'].strip()}")
-                    else:
-                        results.append(f"Analysis for {filename}: Failed to get suggestions from LLM.")
-                except Exception as e:
-                    results.append(f"Analysis for {filename}: Error reading file - {e}")
-            else:
-                results.append(f"Analysis for {filename}: File not found.")
-        
-        return {"status": "SUGGESTED", "result": "\n---\n".join(results)}
+    **Strategy:** {strategy_name}
 
-    async def suggest_manual_action(description: str):
-        """Formats a suggestion for manual action."""
-        print(f"[MCOL] Suggesting Manual Action: {description}")
-        return {"status": "SUGGESTED", "result": f"Suggestion: {description}"}
+    **Problem Context:** (Inferred from previous MCOL step - add if available)
 
-    # --- Strategy Execution Mapping ---
-    implementation_result = {"status": "FAILED", "result": "Strategy implementation logic not defined or failed."}
-    suggestion_text = f"Suggest manually implementing strategy: {strategy['name']}. Description: {strategy['description']}"
+    **Suggested Action/Analysis:**
+    {strategy_desc}
+    """
 
-    # --- Strategy Execution Mapping (Focus on SUGGEST mode) ---
-    if MCOL_IMPLEMENTATION_MODE == "SUGGEST":
-        # In SUGGEST mode, most strategies just log their description as a suggestion.
-        # Specific analysis strategies might run but still result in suggestions.
-        if "analyze website conversion" in strategy_name:
-             implementation_result = await analyze_website_conversion()
-        # Add other specific analysis handlers here if needed
-        # elif "analyze email performance" in strategy_name: ...
-        else:
-             # Default for SUGGEST mode is just logging the strategy description
-             implementation_result = await suggest_manual_action(strategy['description'])
+    # Log the suggestion
+    # The actual logging to DB happens in the main cycle using this result
+    implementation_result = {
+        "status": "SUGGESTED",
+        "result": suggestion_output.strip() # Store the formatted suggestion
+    }
 
-    # --- Placeholder for Future Execution Modes ---
-    # elif MCOL_IMPLEMENTATION_MODE == "EXECUTE_PROMPT_TUNING":
-    #     if "tune email prompts" in strategy_name:
-    #         # implementation_result = await execute_prompt_update(...) # Example
-    #         pass
-    #     else:
-    #         implementation_result = await suggest_manual_action(strategy['description']) # Fallback to suggest
-    # elif MCOL_IMPLEMENTATION_MODE == "EXECUTE_SAFE_CONFIG":
-    #      # Example: Adjusting delays, enabling/disabling features via DB flags
-    #      pass
-    else: # Default or unknown mode -> Suggest
-        implementation_result = await suggest_manual_action(strategy['description'])
-
-
-    print(f"[MCOL] Implementation outcome for '{strategy['name']}': {implementation_result['status']} - {implementation_result['result']}")
+    logger.info(f"[MCOL] Implementation outcome for '{strategy_name}': {implementation_result['status']}")
     return {
         "status": implementation_result["status"],
         "result": implementation_result["result"],
-        "parameters": action_details
+        "parameters": action_details # Store original strategy details for context
     }
+
+async def check_api_key_status(db: AsyncSession) -> Optional[Dict[str, Any]]:
+    """Checks the status of API keys and returns a suggestion if low."""
+    try:
+        active_keys_count = await crud.count_active_api_keys(db, provider=settings.LLM_PROVIDER or "openrouter")
+        logger.info(f"[MCOL] Active API Keys Check: Found {active_keys_count} active keys.")
+        if active_keys_count < API_KEY_LOW_THRESHOLD:
+            problem = f"Low Active API Keys ({active_keys_count} < {API_KEY_LOW_THRESHOLD})"
+            reasoning = "Insufficient active API keys risk halting all LLM-dependent operations (MCOL, Prospecting, Marketing, Reporting)."
+            strategy_desc = f"Suggest Operator: 1. Manually acquire {API_KEY_LOW_THRESHOLD - active_keys_count + 5} new OpenRouter API keys. 2. Add keys via DB script/tool. 3. Consider running the KeyAcquirer worker (`/control/start/key_acquirer`) if automated acquisition was previously successful, but monitor its logs closely for failures (CAPTCHA/blocks)."
+            strategy = {"name": "Address Low API Key Count", "description": strategy_desc}
+            suggestion = await implement_strategy(None, strategy) # No client needed for suggestion formatting
+            return {
+                "problem": problem,
+                "reasoning": reasoning,
+                "suggestion": suggestion # Contains status, result, parameters
+            }
+    except Exception as e:
+        logger.error(f"[MCOL] Error checking API key status: {e}", exc_info=True)
+    return None
 
 
 # --- Main MCOL Agent Cycle ---
 async def run_mcol_cycle(db: AsyncSession, shutdown_event: asyncio.Event):
-    """Runs a single Monitor -> Analyze -> Strategize -> Implement -> Verify cycle."""
+    """Runs a single Monitor -> Analyze -> Strategize -> Implement cycle."""
     if shutdown_event.is_set(): return
-    print(f"[MCOL] Starting cycle at {datetime.datetime.now(datetime.timezone.utc)}")
+    logger.info(f"[MCOL] Starting cycle at {datetime.datetime.now(datetime.timezone.utc)}")
     client: Optional[httpx.AsyncClient] = None
     current_snapshot: Optional[models.KpiSnapshot] = None
     decision_log_id: Optional[int] = None
+    suggestion_to_log = None
 
     try:
-        client = await get_httpx_client()
+        # 0. Pre-Cycle Check: API Key Status (High Priority)
+        key_status_suggestion = await check_api_key_status(db)
+        if key_status_suggestion:
+            logger.warning(f"[MCOL] Priority Issue Detected: {key_status_suggestion['problem']}")
+            suggestion_to_log = key_status_suggestion['suggestion']
+            # Log this critical suggestion immediately
+            decision = await crud.log_mcol_decision(
+                db, kpi_snapshot_id=None, # No full KPI cycle run yet
+                priority_problem=key_status_suggestion["problem"],
+                analysis_summary=key_status_suggestion["reasoning"],
+                chosen_action=suggestion_to_log['parameters']['name'],
+                action_status=suggestion_to_log['status'],
+                action_result=suggestion_to_log['result'],
+                action_parameters=suggestion_to_log.get("parameters")
+            )
+            await db.commit()
+            logger.info(f"[MCOL] Logged critical API key suggestion (Log ID: {decision.log_id}). Proceeding to main cycle.")
+            # Continue to main cycle, but this critical suggestion is logged.
 
         # 1. Monitor: Create KPI Snapshot
         current_snapshot = await crud.create_kpi_snapshot(db)
-        await db.commit()
+        await db.commit() # Commit snapshot separately
         kpi_str = format_kpis_for_llm(current_snapshot)
-        print(f"[MCOL] {kpi_str}")
+        logger.info(f"[MCOL] {kpi_str}")
 
         # 2. Analyze & Prioritize
+        client = await get_httpx_client()
         analysis = await analyze_performance_and_prioritize(client, kpi_str)
         if not analysis:
-            print("[MCOL] No critical problems identified or analysis failed. Ending cycle.")
+            logger.info("[MCOL] No critical problems identified by LLM or analysis failed. Ending cycle.")
             if client: await client.aclose()
             return
 
+        # Log initial decision phase
         decision = await crud.log_mcol_decision(
             db, kpi_snapshot_id=current_snapshot.snapshot_id,
             priority_problem=analysis["problem"], analysis_summary=analysis["reasoning"],
             action_status='ANALYZED'
         )
-        await db.commit()
+        await db.commit() # Commit analysis phase
         decision_log_id = decision.log_id
 
         # 3. Strategize
         strategies = await generate_solution_strategies(client, analysis["problem"], analysis["reasoning"], kpi_str)
         if not strategies:
-            await crud.update_mcol_decision_log(db, decision_log_id, action_status='FAILED_STRATEGY')
+            await crud.update_mcol_decision_log(db, decision_log_id, action_status='FAILED_STRATEGY', action_result="LLM failed to generate valid strategies.")
             await db.commit()
-            print("[MCOL] Failed to generate strategies. Ending cycle.")
+            logger.error("[MCOL] Failed to generate strategies. Ending cycle.")
             if client: await client.aclose()
             return
 
-        await crud.update_mcol_decision_log(db, decision_log_id, generated_strategy=strategies) # Store list directly if DB field is JSON
-        await db.commit()
+        await crud.update_mcol_decision_log(db, decision_log_id, generated_strategy=strategies)
+        await db.commit() # Commit generated strategies
 
         # 4. Choose Strategy
         chosen_strategy = choose_strategy(strategies)
         if not chosen_strategy:
-             await crud.update_mcol_decision_log(db, decision_log_id, action_status='FAILED_STRATEGY')
+             # Should not happen if strategies were generated, but handle defensively
+             await crud.update_mcol_decision_log(db, decision_log_id, action_status='FAILED_STRATEGY', action_result="Strategy list was empty after generation.")
              await db.commit()
+             logger.error("[MCOL] Strategy list empty after generation. Ending cycle.")
              if client: await client.aclose()
              return
 
         await crud.update_mcol_decision_log(db, decision_log_id, chosen_action=chosen_strategy['name'])
-        await db.commit()
+        await db.commit() # Commit chosen strategy
 
-        # 5. Implement (Suggest or Attempt Execute)
+        # 5. Implement (Suggest Mode)
         implementation_result = await implement_strategy(client, chosen_strategy)
 
+        # Update the log with the final suggestion/outcome
         await crud.update_mcol_decision_log(
             db, decision_log_id,
             action_status=implementation_result["status"],
             action_result=implementation_result["result"],
             action_parameters=implementation_result.get("parameters")
         )
-        await db.commit()
+        await db.commit() # Commit final outcome
 
-        print(f"[MCOL] Cycle finished. Action status: {implementation_result['status']}")
+        logger.info(f"[MCOL] Cycle finished. Action status: {implementation_result['status']}")
 
     except Exception as e:
-        print(f"[MCOL] CRITICAL Error during MCOL cycle: {e}")
-        import traceback
-        traceback.print_exc()
+        logger.error(f"[MCOL] CRITICAL Error during MCOL cycle: {e}", exc_info=True)
         if decision_log_id:
             try:
-                await crud.update_mcol_decision_log(db, decision_log_id, action_status='FAILED_CYCLE', action_result=f"Cycle error: {traceback.format_exc()}")
+                # Attempt to log the cycle failure to the existing log entry
+                await crud.update_mcol_decision_log(db, decision_log_id, action_status='FAILED_CYCLE', action_result=f"Cycle error: {traceback.format_exc(limit=500)}")
                 await db.commit()
             except Exception as db_err:
-                 print(f"[MCOL] Failed to log cycle error to DB: {db_err}")
-                 await db.rollback()
+                 logger.error(f"[MCOL] Failed to log cycle error to DB: {db_err}")
+                 await db.rollback() # Rollback if logging the error fails
         else:
+             # If no decision log entry was even created
              await db.rollback()
     finally:
         if client:

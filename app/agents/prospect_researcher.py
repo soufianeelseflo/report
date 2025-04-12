@@ -1,6 +1,10 @@
+# autonomous_agency/app/agents/prospect_researcher.py
 import asyncio
 import random
 import json
+import subprocess
+import os
+import logging
 from typing import Optional, List, Dict, Any
 from urllib.parse import urljoin, urlparse
 import datetime
@@ -10,29 +14,35 @@ import httpx # Use the client from agent_utils
 from tenacity import retry, stop_after_attempt, wait_fixed, retry_if_exception_type
 
 # Corrected relative imports for package structure
-from Acumenis.app.core.config import settings
-from Acumenis.app.db import crud, models
-from Acumenis.app.agents.agent_utils import get_httpx_client, call_llm_api # Import shared LLM caller
+try:
+    from Acumenis.app.core.config import settings
+    from Acumenis.app.db import crud, models
+    from Acumenis.app.agents.agent_utils import get_httpx_client, call_llm_api
+except ImportError:
+    print("[ProspectResearcher] WARNING: Using fallback imports. Ensure package structure is correct for deployment.")
+    from app.core.config import settings
+    from app.db import crud, models
+    from app.agents.agent_utils import get_httpx_client, call_llm_api
+
+# Setup logger
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
 
 # --- Configuration ---
-# Removed SIGNAL_SOURCES as NewsAPI is deprecated
+MAX_PROSPECTS_PER_CYCLE = settings.MAX_PROSPECTS_PER_CYCLE or 20
+OPEN_DEEP_RESEARCH_TIMEOUT = settings.OPEN_DEEP_RESEARCH_TIMEOUT or 300
+EMAIL_VALIDATION_ENABLED = getattr(settings, 'EMAIL_VALIDATION_ENABLED', False) # Control via setting
+EMAIL_VALIDATION_API_URL = getattr(settings, 'EMAIL_VALIDATION_API_URL', None) # e.g., "https://api.examplevalidator.com/v1/validate"
+EMAIL_VALIDATION_API_KEY = getattr(settings, 'EMAIL_VALIDATION_API_KEY', None)
+ODR_FOR_PROSPECT_DETAILS = getattr(settings, 'ODR_FOR_PROSPECT_DETAILS', False) # Control via setting
 
-MAX_PROSPECTS_PER_CYCLE = 20 # Limit prospects generated per run
-# SIGNAL_ANALYSIS_TIMEOUT = 60 # Seconds to wait for LLM inference (Now handled by call_llm_api timeout)
-OPEN_DEEP_RESEARCH_TIMEOUT = 300 # Seconds timeout for the external tool
+# --- Helper Functions ---
 
-# Use tenacity for retrying API calls
-RETRY_WAIT = wait_fixed(3)
-RETRY_ATTEMPTS = 3
-
-# Removed local call_llm_api - use shared one from agent_utils
-
-
-async def infer_pain_points_llm(client: httpx.AsyncClient, company_name: str, company_description: Optional[str] = None) -> Optional[str]:
-    """Uses LLM to infer potential pain points based on company name and optional description."""
+async def infer_pain_points_llm(client: httpx.AsyncClient, company_name: str, company_description: Optional[str] = None, odr_context: Optional[str] = None) -> Optional[str]:
+    """Uses LLM to infer potential pain points based on company info and optional ODR context."""
     context = f"Company: {company_name}"
-    if company_description:
-        context += f"\nDescription: {company_description}"
+    if company_description: context += f"\nDescription: {company_description}"
+    if odr_context: context += f"\n\nAdditional Context from Deep Research:\n{odr_context[:1500]}" # Add ODR context if available
 
     prompt = f"""
     Analyze the following company information:
@@ -44,100 +54,109 @@ async def infer_pain_points_llm(client: httpx.AsyncClient, company_name: str, co
     Example format:
     - Need for faster competitor benchmarking in a dynamic market.
     - Requirement for data-driven validation of new feature ideas.
+    - Difficulty synthesizing competitor insights from disparate sources.
     """
-    # Use shared call_llm_api from agent_utils
-    inference_result = await call_llm_api(client, prompt, model=settings.STANDARD_REPORT_MODEL or "google/gemini-1.5-flash-latest") # Use a standard model
+    inference_result = await call_llm_api(client, prompt, model=settings.STANDARD_REPORT_MODEL or "google/gemini-1.5-flash-latest")
     if inference_result and isinstance(inference_result.get("raw_inference"), str):
         inferred_text = inference_result["raw_inference"].strip()
         if inferred_text.lower() != "none" and len(inferred_text) > 5:
-            print(f"[ProspectResearcher] Inferred pain points for {company_name}: {inferred_text}")
+            logger.info(f"[ProspectResearcher] Inferred pain points for {company_name}: {inferred_text}")
             return inferred_text
-    print(f"[ProspectResearcher] Could not infer pain points for {company_name}.")
+    logger.info(f"[ProspectResearcher] Could not infer pain points for {company_name}.")
     return None
 
 async def find_contact_llm_guess(client: httpx.AsyncClient, company_name: str, website: Optional[str]) -> Optional[str]:
-    """
-    Attempts to find a contact email using LLM pattern guessing.
-    Strategy C: LLM Guessing - Low Reliability.
-    """
+    """Attempts to find a contact email using LLM pattern guessing."""
     if not website:
-        print(f"[ProspectResearcher] Cannot guess email for {company_name} without website.")
+        logger.info(f"[ProspectResearcher] Cannot guess email for {company_name} without website.")
         return None
 
-    parsed_url = urlparse(website)
-    domain = parsed_url.netloc or parsed_url.path # Handle cases with/without scheme
-    domain = domain.replace("www.", "") # Clean domain
-    if not domain:
-         print(f"[ProspectResearcher] Could not extract domain from website: {website}")
+    try:
+        parsed_url = urlparse(website)
+        domain = parsed_url.netloc or parsed_url.path
+        domain = domain.replace("www.", "")
+        if not domain or '.' not in domain: # Basic domain check
+             raise ValueError("Invalid domain extracted")
+    except Exception as e:
+         logger.warning(f"[ProspectResearcher] Could not extract valid domain from website '{website}': {e}")
          return None
 
     prompt = f"""
     Given the company name "{company_name}" and domain "{domain}", suggest the single most likely professional contact email address suitable for B2B outreach regarding market research services.
-    Consider common patterns like:
-    - info@{domain}
-    - contact@{domain}
-    - marketing@{domain}
-    - sales@{domain}
-    - hello@{domain}
-    - press@{domain}
-    - partnerships@{domain}
-    - [firstname].[lastname]@{domain} (if name is guessable, but avoid making up names)
-    - [f].[lastname]@{domain}
-
-    Prioritize generic functional addresses (marketing, sales, info) unless a specific contact strategy is implied.
+    Consider common patterns: info@, contact@, marketing@, sales@, hello@, press@, partnerships@, [firstname].[lastname]@, [f].[lastname]@.
+    Prioritize generic functional addresses (marketing, sales, info) unless a specific contact strategy is implied. Avoid making up names.
     Respond ONLY with the single most likely email address, or "None" if no reasonable guess can be made.
     """
-    print(f"[ProspectResearcher] Attempting LLM email guess for {company_name} ({domain})...")
-    # Use shared call_llm_api from agent_utils
-    llm_response = await call_llm_api(client, prompt, model=settings.STANDARD_REPORT_MODEL or "google/gemini-1.5-flash-latest") # Use a standard model
+    logger.info(f"[ProspectResearcher] Attempting LLM email guess for {company_name} ({domain})...")
+    llm_response = await call_llm_api(client, prompt, model=settings.STANDARD_REPORT_MODEL or "google/gemini-1.5-flash-latest")
 
     if llm_response and isinstance(llm_response.get("raw_inference"), str):
         guessed_email = llm_response["raw_inference"].strip()
         # Basic validation
         if "@" in guessed_email and "." in guessed_email.split("@")[-1] and guessed_email.lower() != "none":
-            print(f"[ProspectResearcher] LLM guessed email: {guessed_email} for {company_name}")
+            logger.info(f"[ProspectResearcher] LLM guessed email: {guessed_email} for {company_name}")
             return guessed_email
         else:
-             print(f"[ProspectResearcher] LLM did not provide a valid email guess for {company_name}. Response: {guessed_email}")
+             logger.info(f"[ProspectResearcher] LLM did not provide a valid email guess for {company_name}. Response: {guessed_email}")
     else:
-         print(f"[ProspectResearcher] LLM email guessing failed for {company_name}.")
-
-    # Fallback or default if LLM fails
-    # return f"info@{domain}" # Optionally return a default guess
+         logger.warning(f"[ProspectResearcher] LLM email guessing failed for {company_name}.")
     return None
 
-async def run_opendeepresearch_query(query: str) -> Optional[List[Dict]]:
-    """
-    Runs the open-deep-research tool as a subprocess with a given query.
-    Parses the JSON output file.
-    """
-    print(f"[ProspectResearcher] Running open-deep-research for query: '{query[:50]}...'")
-    results = None
-    output_filename = f"research_output_{random.randint(1000, 9999)}.json"
-    # Assume output is saved relative to the tool's repo path for simplicity
-    output_path = os.path.join(settings.OPEN_DEEP_RESEARCH_REPO_PATH, output_filename)
+async def validate_email_api(client: httpx.AsyncClient, email: str) -> bool:
+    """Validates an email using a configured external API (placeholder)."""
+    if not EMAIL_VALIDATION_ENABLED or not EMAIL_VALIDATION_API_URL or not email:
+        return True # Skip validation if disabled or no email
 
-    # Construct command
+    logger.info(f"[ProspectResearcher] Validating email: {email}")
+    headers = {"Authorization": f"Bearer {EMAIL_VALIDATION_API_KEY}"} if EMAIL_VALIDATION_API_KEY else {}
+    params = {"email": email} # Common parameter name
+
+    try:
+        # Use a separate client for validation API if needed, or reuse the main one
+        async with httpx.AsyncClient(timeout=15.0) as validation_client:
+            response = await validation_client.get(EMAIL_VALIDATION_API_URL, params=params, headers=headers)
+            response.raise_for_status()
+            result = response.json()
+            # --- Adapt parsing based on the specific API's response structure ---
+            is_valid = result.get("is_valid") or result.get("status") == "valid" or result.get("deliverable")
+            # --- End Adapt ---
+            logger.info(f"Validation result for {email}: {'Valid' if is_valid else 'Invalid'}")
+            return bool(is_valid)
+    except Exception as e:
+        logger.error(f"Email validation API call failed for {email}: {e}")
+        return True # Default to true (assume valid) on API failure to avoid discarding potentially good leads
+
+async def run_opendeepresearch_query(query: str, depth: int = 1) -> Optional[Union[List[Dict], str]]:
+    """
+    Runs the open-deep-research tool as a subprocess.
+    Returns parsed JSON results (list of dicts) or raw text output on failure/non-JSON.
+    """
+    logger.info(f"[ProspectResearcher] Running ODR query (depth {depth}): '{query[:50]}...'")
+    output_filename = f"odr_output_{random.randint(1000, 9999)}.json"
+    output_path = os.path.join(settings.OPEN_DEEP_RESEARCH_REPO_PATH, output_filename)
     node_script_path = os.path.join(settings.OPEN_DEEP_RESEARCH_REPO_PATH, settings.OPEN_DEEP_RESEARCH_ENTRY_POINT)
+
     if not os.path.exists(settings.NODE_EXECUTABLE_PATH):
-        print(f"Error: Node executable not found at: {settings.NODE_EXECUTABLE_PATH}")
-        return None
+        logger.error(f"Node executable not found at: {settings.NODE_EXECUTABLE_PATH}")
+        return f"Error: Node executable not found at {settings.NODE_EXECUTABLE_PATH}"
     if not os.path.exists(node_script_path):
-        print(f"Error: open-deep-research entry point not found at: {node_script_path}")
-        return None
+        logger.error(f"ODR entry point not found at: {node_script_path}")
+        return f"Error: ODR entry point not found at {node_script_path}"
 
     cmd = [
         settings.NODE_EXECUTABLE_PATH,
         node_script_path,
         "--query", query,
-        "--output", output_path, # Assuming the tool saves JSON to this path
-        "--json", # Assuming a flag for JSON output
-        # Add other relevant flags like --depth if needed
-        # "--depth", "3",
+        "--output", output_path,
+        "--json", # Assume JSON output flag
+        "--depth", str(depth), # Control research depth
+        # Add model selection if ODR supports it and we want to control it here
+        # "--model", settings.STANDARD_REPORT_MODEL or "google/gemini-1.5-flash-latest"
     ]
 
+    raw_output = ""
     try:
-        print(f"[ProspectResearcher] Executing: {' '.join(cmd)}")
+        logger.info(f"[ProspectResearcher] Executing ODR: {' '.join(cmd)}")
         process = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
@@ -145,136 +164,151 @@ async def run_opendeepresearch_query(query: str) -> Optional[List[Dict]]:
             cwd=settings.OPEN_DEEP_RESEARCH_REPO_PATH
         )
 
-        try:
-            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=OPEN_DEEP_RESEARCH_TIMEOUT)
-        except asyncio.TimeoutError:
-            print(f"[ProspectResearcher] open-deep-research timed out after {OPEN_DEEP_RESEARCH_TIMEOUT}s. Terminating.")
-            try:
-                process.terminate()
-                await asyncio.wait_for(process.wait(), timeout=5.0)
-            except Exception: process.kill() # Force kill if terminate fails
-            raise TimeoutError("open-deep-research subprocess timed out.")
-
+        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=OPEN_DEEP_RESEARCH_TIMEOUT)
         stdout_decoded = stdout.decode(errors='ignore').strip() if stdout else ""
         stderr_decoded = stderr.decode(errors='ignore').strip() if stderr else ""
-        print(f"[ProspectResearcher] open-deep-research exited with code: {process.returncode}")
-        if stdout_decoded: print(f"[ProspectResearcher] ODR STDOUT: {stdout_decoded[:500]}...")
-        if stderr_decoded: print(f"[ProspectResearcher] ODR STDERR: {stderr_decoded[:500]}...")
+        raw_output = f"STDOUT:\n{stdout_decoded}\n\nSTDERR:\n{stderr_decoded}"
+        logger.info(f"[ProspectResearcher] ODR exited with code: {process.returncode}")
+        if stdout_decoded: logger.debug(f"[ProspectResearcher] ODR STDOUT: {stdout_decoded[:500]}...")
+        if stderr_decoded: logger.warning(f"[ProspectResearcher] ODR STDERR: {stderr_decoded[:500]}...")
 
         if process.returncode == 0 and os.path.exists(output_path):
             try:
                 with open(output_path, 'r', encoding='utf-8') as f:
                     results = json.load(f)
-                print(f"[ProspectResearcher] Successfully parsed results from {output_path}")
-                # Assuming results is a list of dictionaries, one per company/lead
-                if not isinstance(results, list):
-                     print(f"[ProspectResearcher] Warning: Expected list from JSON output, got {type(results)}. Trying to adapt.")
-                     # Attempt to adapt if it's a dict with a known key, otherwise fail
-                     if isinstance(results, dict) and 'results' in results and isinstance(results['results'], list):
-                          results = results['results']
-                     elif isinstance(results, dict) and 'companies' in results and isinstance(results['companies'], list):
-                          results = results['companies']
-                     else:
-                          results = None # Cannot adapt
+                logger.info(f"[ProspectResearcher] Successfully parsed JSON results from {output_path}")
+                # Basic validation - adapt based on expected ODR JSON structure
+                if isinstance(results, list): return results
+                if isinstance(results, dict) and 'results' in results and isinstance(results['results'], list): return results['results']
+                if isinstance(results, dict) and 'companies' in results and isinstance(results['companies'], list): return results['companies']
+                logger.warning(f"ODR JSON output is not a list or expected dict structure: {type(results)}")
+                return raw_output # Return raw output if JSON structure is unexpected
             except json.JSONDecodeError as e:
-                print(f"[ProspectResearcher] Error decoding JSON from {output_path}: {e}")
+                logger.error(f"Error decoding JSON from {output_path}: {e}")
+                return raw_output # Return raw output if JSON parsing fails
             except Exception as e:
-                print(f"[ProspectResearcher] Error reading results file {output_path}: {e}")
+                logger.error(f"Error reading results file {output_path}: {e}")
+                return raw_output
         else:
-            print(f"[ProspectResearcher] open-deep-research failed (Code: {process.returncode}) or output file missing ({output_path}).")
+            logger.error(f"ODR failed (Code: {process.returncode}) or output file missing/empty ({output_path}).")
+            return raw_output # Return raw output on failure
 
-    except TimeoutError as e:
-         print(f"[ProspectResearcher] TimeoutError: {e}")
+    except asyncio.TimeoutError:
+         logger.error(f"ODR timed out after {OPEN_DEEP_RESEARCH_TIMEOUT}s for query: '{query[:50]}...'")
+         return f"Error: ODR subprocess timed out after {OPEN_DEEP_RESEARCH_TIMEOUT}s."
     except FileNotFoundError as e:
-         print(f"[ProspectResearcher] FileNotFoundError running open-deep-research: {e}")
+         logger.error(f"FileNotFoundError running ODR: {e}")
+         return f"Error: FileNotFoundError running ODR - {e}"
     except Exception as e:
-        print(f"[ProspectResearcher] Unexpected error running open-deep-research: {e}")
+        logger.error(f"Unexpected error running ODR: {e}", exc_info=True)
+        return f"Error: Unexpected error running ODR - {e}"
     finally:
-        # Clean up the output file
         if os.path.exists(output_path):
-            try:
-                os.remove(output_path)
-            except OSError as e:
-                print(f"[ProspectResearcher] Error removing output file {output_path}: {e}")
-
-    return results
-# Removed duplicate return statement
-    return added_count
+            try: os.remove(output_path)
+            except OSError as e: logger.warning(f"Error removing ODR output file {output_path}: {e}")
 
 
 async def run_prospecting_cycle(db: AsyncSession, shutdown_event: asyncio.Event):
-    """
-    Runs a single cycle of prospecting using open-deep-research.
-    """
-    print("[ProspectResearcher] Starting prospecting cycle...")
+    """Runs a single cycle of prospecting using ODR and LLM enrichment."""
+    logger.info("[ProspectResearcher] Starting prospecting cycle...")
     prospects_added_this_cycle = 0
-    client = await get_httpx_client() # For LLM enrichment
+    client = await get_httpx_client()
 
-    # Define research queries/strategies for open-deep-research
-    # TODO: Make these dynamic or configurable
-    research_queries = [
+    # Define research queries - MCOL should ideally suggest/refine these
+    # Example: Fetch queries from DB or config?
+    research_queries = getattr(settings, 'PROSPECTING_QUERIES', [
         "List B2B SaaS companies in marketing technology that received Series A funding recently",
         "Identify companies launching new AI-powered analytics products",
         "Find e-commerce platforms expanding into international markets",
-    ]
+        "Companies announcing large layoffs in tech sector", # Example of a different signal
+        "Pharmaceutical companies with recent phase 3 trial failures" # Example signal
+    ])
+    random.shuffle(research_queries) # Process in random order
 
     try:
         for query in research_queries:
             if shutdown_event.is_set(): break
             if prospects_added_this_cycle >= MAX_PROSPECTS_PER_CYCLE: break
 
-            research_results = await run_opendeepresearch_query(query)
+            odr_results = await run_opendeepresearch_query(query, depth=1) # Initial shallow search
 
-            if research_results:
-                print(f"[ProspectResearcher] Processing {len(research_results)} results from query: '{query[:50]}...'")
-                for result in research_results:
+            if isinstance(odr_results, list): # Check if we got structured data
+                logger.info(f"[ProspectResearcher] Processing {len(odr_results)} results from query: '{query[:50]}...'")
+                for result in odr_results:
                     if shutdown_event.is_set(): break
                     if prospects_added_this_cycle >= MAX_PROSPECTS_PER_CYCLE: break
 
-                    # --- Adapt parsing based on actual open-deep-research output ---
-                    # Assuming output provides at least 'name' and potentially 'website', 'description'
+                    # --- Adapt parsing based on actual ODR output ---
                     company_name = result.get("name") or result.get("company_name")
                     website = result.get("website") or result.get("url")
                     description = result.get("description") or result.get("summary") or result.get("signal")
                     # --- End Adapt ---
 
-                    if not company_name: continue # Skip if no company name found
-
+                    if not company_name: continue
                     company_name = company_name.strip()
-                    print(f"[ProspectResearcher] Processing lead: {company_name}")
+                    logger.info(f"[ProspectResearcher] Processing lead: {company_name}")
 
-                    # Infer pain points
-                    inferred_pain = await infer_pain_points_llm(client, company_name, description)
+                    odr_context_for_llm = None
+                    if ODR_FOR_PROSPECT_DETAILS and website:
+                        # Run deeper ODR search specifically for this company
+                        logger.info(f"Running deeper ODR search for {company_name}...")
+                        detail_query = f"Detailed analysis of {company_name} ({website or ''}) focusing on recent activities, challenges, and strategic direction."
+                        detail_results = await run_opendeepresearch_query(detail_query, depth=2) # Deeper search
+                        if isinstance(detail_results, str): # If ODR returned raw text
+                            odr_context_for_llm = detail_results[:2000] # Use truncated raw text
+                        elif isinstance(detail_results, list) and detail_results:
+                            # Try to synthesize list results into context
+                            odr_context_for_llm = json.dumps(detail_results[:5], indent=2)[:2000] # Use first few results
+                        else:
+                            logger.info(f"No detailed ODR context found for {company_name}.")
+
+
+                    # Infer pain points using LLM, potentially with ODR context
+                    inferred_pain = await infer_pain_points_llm(client, company_name, description, odr_context_for_llm)
 
                     # Attempt to find contact email using LLM guessing
                     contact_email = await find_contact_llm_guess(client, company_name, website)
+
+                    # Validate email if enabled and found
+                    is_valid_email = True
+                    if contact_email and EMAIL_VALIDATION_ENABLED:
+                        is_valid_email = await validate_email_api(client, contact_email)
+
+                    prospect_status = "NEW" if is_valid_email else "INVALID_EMAIL"
+                    if not contact_email: prospect_status = "NEW" # Keep NEW if no email guessed
 
                     # Save prospect
                     try:
                         created = await crud.create_prospect(
                             db=db,
                             company_name=company_name,
-                            email=contact_email,
+                            email=contact_email if is_valid_email else None, # Store None if invalid
                             website=website,
                             pain_point=inferred_pain,
-                            source=f"odr_{query[:30]}" # Source indicates ODR query
+                            source=f"odr_{query[:30].replace(' ', '_')}", # Source indicates ODR query
+                            status=prospect_status # Set status based on validation
                         )
                         if created:
-                            await db.commit()
+                            await db.commit() # Commit each prospect individually
                             prospects_added_this_cycle += 1
-                            print(f"[ProspectResearcher] Prospect '{created.company_name}' added from ODR (ID: {created.prospect_id}). Total added: {prospects_added_this_cycle}")
+                            logger.info(f"Prospect '{created.company_name}' (ID: {created.prospect_id}) saved with status {prospect_status}. Total added: {prospects_added_this_cycle}")
                         else:
-                            await db.rollback() # Duplicate or other issue
+                            await db.rollback() # Duplicate or other issue during save
                     except Exception as e:
-                        print(f"[ProspectResearcher] Error saving prospect from ODR ({company_name}) to DB: {e}")
+                        logger.error(f"Error saving prospect from ODR ({company_name}) to DB: {e}", exc_info=True)
                         await db.rollback()
 
-                    await asyncio.sleep(random.uniform(0.5, 1.5)) # Small delay between processing results
+                    await asyncio.sleep(random.uniform(1.0, 2.5)) # Slightly longer delay
+
+            elif isinstance(odr_results, str): # ODR failed or returned raw text
+                logger.error(f"ODR query failed or returned non-JSON for query '{query[:50]}...': {odr_results}")
+            else:
+                 logger.info(f"No results returned from ODR query: '{query[:50]}...'")
+
 
     except Exception as e:
-        print(f"[ProspectResearcher] Unexpected error during prospecting cycle: {e}")
-        # Log error
+        logger.error(f"[ProspectResearcher] Unexpected error during prospecting cycle: {e}", exc_info=True)
     finally:
-        await client.aclose()
+        if client: await client.aclose()
 
-    print(f"[ProspectResearcher] Prospecting cycle finished. Added {prospects_added_this_cycle} new prospects.")
+    logger.info(f"[ProspectResearcher] Prospecting cycle finished. Added {prospects_added_this_cycle} new prospects.")

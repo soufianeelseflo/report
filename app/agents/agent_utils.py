@@ -8,17 +8,17 @@ import random # To potentially select keys later
 from tenacity import retry, stop_after_attempt, wait_fixed, retry_if_exception, RetryError # Use retry_if_exception
 import traceback # Import traceback at the top
 import datetime # For rate limit cooldown
+import logging # Use standard logging
 
 import asyncio # For async operations like key loading
 from sqlalchemy.ext.asyncio import AsyncSession
 
 # Corrected relative import for package structure
-# Assuming Acumenis is the root package name based on later files
 try:
-    from Acumenis.app.core.config import settings # Adjusted path
-    from Acumenis.app.db.base import get_worker_session # Function to get DB session for background tasks
-    from Acumenis.app.db import crud # Import CRUD functions
-    from Acumenis.app.core.security import decrypt_data # Ensure decrypt is imported
+    from Acumenis.app.core.config import settings
+    from Acumenis.app.db.base import get_worker_session
+    from Acumenis.app.db import crud
+    from Acumenis.app.core.security import decrypt_data
 except ImportError:
     print("[AgentUtils] WARNING: Using fallback imports. Ensure package structure is correct for deployment.")
     from app.core.config import settings
@@ -26,11 +26,15 @@ except ImportError:
     from app.db import crud
     from app.core.security import decrypt_data
 
+# Setup logger
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO) # Adjust level as needed
+
 # Use tenacity for retrying API calls
 RETRY_WAIT = wait_fixed(3) # Wait 3 seconds between retries
 RETRY_ATTEMPTS = 3 # Retry up to 3 times
-LLM_TIMEOUT = 120.0 # Increased timeout for potentially long generations (e.g., report analysis)
-RATE_LIMIT_COOLDOWN_SECONDS = 60 # Cooldown period for rate-limited keys
+LLM_TIMEOUT = 120.0 # Increased timeout for potentially long generations
+RATE_LIMIT_COOLDOWN_SECONDS = getattr(settings, 'RATE_LIMIT_COOLDOWN_SECONDS', 60) # Use setting or default
 
 # --- Global variables for API keys ---
 # Store more key info for better management
@@ -48,20 +52,18 @@ def get_proxy_map() -> Optional[dict]:
     proxy_url = settings.PROXY_URL
     if proxy_url:
         if not re.match(r"^(http|https|socks\d?)://", proxy_url):
-             print(f"[Proxy] WARNING: Configured PROXY_URL '{proxy_url}' doesn't look like a valid URL.")
+             logger.warning(f"[Proxy] Configured PROXY_URL '{proxy_url}' doesn't look like a valid URL.")
              return None
         return {"http://": proxy_url, "https://": proxy_url}
-    # Handle PROXY_LIST if PROXY_URL is not set
     elif settings.PROXY_LIST:
         valid_proxies = [p for p in settings.PROXY_LIST if re.match(r"^(http|https|socks\d?)://", p)]
         if valid_proxies:
-            # Use a random proxy from the list for the client for better distribution
             selected_proxy = random.choice(valid_proxies)
             proxy_display = selected_proxy.split('@')[-1] if '@' in selected_proxy else selected_proxy
-            print(f"[Proxy] Using random proxy from PROXY_LIST for client: {proxy_display}")
+            logger.info(f"[Proxy] Using random proxy from PROXY_LIST for client: {proxy_display}")
             return {"http://": selected_proxy, "https://": selected_proxy}
         else:
-            print("[Proxy] PROXY_LIST configured but contains no valid URLs.")
+            logger.warning("[Proxy] PROXY_LIST configured but contains no valid URLs.")
             return None
     return None
 
@@ -72,8 +74,10 @@ async def get_httpx_client() -> httpx.AsyncClient:
     timeout = httpx.Timeout(LLM_TIMEOUT, connect=15.0)
 
     headers = {
-        "User-Agent": f"AcumenisAgent/1.0 ({settings.AGENCY_BASE_URL or 'http://localhost'})",
+        "User-Agent": f"AcumenisAgent/1.1 ({settings.AGENCY_BASE_URL or 'http://localhost'})", # Version bump
         # Add other common headers if needed
+        "Accept": "*/*",
+        "Accept-Language": "en-US,en;q=0.9",
     }
 
     client = httpx.AsyncClient(
@@ -92,10 +96,11 @@ async def load_and_update_api_keys():
     Handles decryption and potential errors, stores key ID and rate limit info.
     """
     global AVAILABLE_API_KEYS, CURRENT_KEY_INDEX, _keys_loaded
-    async with _key_load_lock: # Ensure only one load happens at a time
-        print("[API Keys] Attempting to refresh API keys from database...")
+    async with _key_load_lock:
+        logger.info("[API Keys] Attempting to refresh API keys from database...")
         session: AsyncSession = None
         new_keys_loaded = []
+        keys_marked_for_error = []
         try:
             session = await get_worker_session()
             provider = settings.LLM_PROVIDER or "openrouter"
@@ -113,51 +118,50 @@ async def load_and_update_api_keys():
                                 'rate_limited_until': key_detail.get('rate_limited_until') # Get timestamp if exists
                             })
                         else:
-                            print(f"[API Keys] Decryption failed for key ID {key_detail['id']}. Skipping.")
-                            # Optionally mark as error in DB here?
-                            # await crud.set_api_key_status_by_id(session, key_detail['id'], 'error', 'Decryption failed during load')
+                            logger.warning(f"[API Keys] Decryption failed for key ID {key_detail['id']}. Skipping and marking as error.")
+                            keys_marked_for_error.append((key_detail['id'], 'Decryption failed during load'))
                     except Exception as decrypt_err:
-                        print(f"[API Keys] Error decrypting key ID {key_detail['id']}: {decrypt_err}. Skipping.")
-                        # await crud.set_api_key_status_by_id(session, key_detail['id'], 'error', f'Decryption exception: {decrypt_err}')
+                        logger.warning(f"[API Keys] Error decrypting key ID {key_detail['id']}: {decrypt_err}. Skipping and marking as error.")
+                        keys_marked_for_error.append((key_detail['id'], f'Decryption exception: {decrypt_err}'))
 
-                print(f"[API Keys] Successfully loaded and decrypted {len(new_keys_loaded)} active keys for provider '{provider}'.")
-                # Commit any status changes made during loading (like marking decryption errors)
-                # await session.commit() # Commit error status updates if any
+                # Mark keys with decryption errors in the DB
+                if keys_marked_for_error:
+                    for key_id, reason in keys_marked_for_error:
+                        await crud.set_api_key_status_by_id(session, key_id, 'error', reason)
+                    await session.commit() # Commit error status updates
+
+                logger.info(f"[API Keys] Successfully loaded and decrypted {len(new_keys_loaded)} active keys for provider '{provider}'.")
             else:
-                print(f"[API Keys] No active keys found in DB for provider '{provider}'.")
+                logger.info(f"[API Keys] No active keys found in DB for provider '{provider}'.")
                 # Fallback: Use the key from .env ONLY if DB is empty AND it's OpenRouter
                 if settings.OPENROUTER_API_KEY and provider == "openrouter":
-                    print("[API Keys] Using fallback API key from settings.")
-                    # Add with a placeholder ID or handle differently? For now, just the key.
+                    logger.info("[API Keys] Using fallback API key from settings.")
                     new_keys_loaded = [{'id': None, 'key': settings.OPENROUTER_API_KEY, 'rate_limited_until': None}]
                 else:
-                    new_keys_loaded = [] # Ensure it's empty if DB and fallback fail
+                    new_keys_loaded = []
 
             # Atomically update the global list and reset index
             AVAILABLE_API_KEYS = new_keys_loaded
-            CURRENT_KEY_INDEX = 0 if AVAILABLE_API_KEYS else -1 # Reset index or set to -1 if empty
-            _keys_loaded = True # Mark that a load attempt was made
+            CURRENT_KEY_INDEX = 0 if AVAILABLE_API_KEYS else -1
+            _keys_loaded = True
 
         except Exception as e:
-            print(f"[API Keys] Error loading API keys from database: {e}")
-            traceback.print_exc()
-            # Keep existing keys if load fails? Or clear? Keep for resilience.
-            print(f"[API Keys] Keeping previously loaded keys ({len(AVAILABLE_API_KEYS)}) due to load error.")
+            logger.error(f"[API Keys] Error loading API keys from database: {e}", exc_info=True)
+            logger.warning(f"[API Keys] Keeping previously loaded keys ({len(AVAILABLE_API_KEYS)}) due to load error.")
             _keys_loaded = True # Still mark as loaded attempt
-            if session: await session.rollback() # Rollback on general load error
+            if session: await session.rollback()
         finally:
             if session:
                 await session.close()
 
 async def _key_refresh_loop():
     """Background loop to periodically refresh API keys."""
-    print("[API Keys] Starting background key refresh loop...")
+    logger.info("[API Keys] Starting background key refresh loop...")
     while True:
         try:
             await load_and_update_api_keys()
         except Exception as e:
-            print(f"[API Keys] Error in refresh loop: {e}")
-            traceback.print_exc() # Log full trace for loop errors
+            logger.error(f"[API Keys] Error in refresh loop: {e}", exc_info=True)
         await asyncio.sleep(_key_refresh_interval)
 
 def start_key_refresh_task():
@@ -165,12 +169,9 @@ def start_key_refresh_task():
     global _key_refresh_task
     if _key_refresh_task is None or _key_refresh_task.done():
         _key_refresh_task = asyncio.create_task(_key_refresh_loop())
-        print("[API Keys] Background key refresh task started.")
+        logger.info("[API Keys] Background key refresh task started.")
     else:
-        print("[API Keys] Background key refresh task already running.")
-
-# Call this on application startup (e.g., in main.py's startup event)
-# start_key_refresh_task() # Moved to main.py startup
+        logger.info("[API Keys] Background key refresh task already running.")
 
 def get_next_api_key() -> Optional[Dict[str, Any]]:
     """
@@ -181,15 +182,17 @@ def get_next_api_key() -> Optional[Dict[str, Any]]:
     global CURRENT_KEY_INDEX
 
     if not _keys_loaded:
-        print("[LLM Call] CRITICAL: API keys have not been loaded yet. Call load_and_update_api_keys() or ensure startup load.")
+        logger.critical("[LLM Call] CRITICAL: API keys have not been loaded yet.")
+        # Consider a one-time synchronous load attempt here? Risky.
+        # asyncio.run(load_and_update_api_keys()) # Avoid this if possible
         return None
 
     if not AVAILABLE_API_KEYS:
-        # print("[LLM Call] Warning: No API keys available in the loaded list.") # Reduce noise
+        # logger.warning("[LLM Call] No API keys available in the loaded list.") # Reduce noise
         return None
 
     num_keys = len(AVAILABLE_API_KEYS)
-    start_index = CURRENT_KEY_INDEX
+    start_index = CURRENT_KEY_INDEX % num_keys # Ensure start_index is valid
 
     for i in range(num_keys):
         current_check_index = (start_index + i) % num_keys
@@ -201,14 +204,12 @@ def get_next_api_key() -> Optional[Dict[str, Any]]:
 
         if not is_rate_limited:
             # Found a valid key
-            CURRENT_KEY_INDEX = (current_check_index + 1) % num_keys # Point to the next one for the next call
-            # print(f"[LLM Call] Using API Key ID: {key_info.get('id', 'N/A')} (Index: {current_check_index})") # Debugging
+            CURRENT_KEY_INDEX = (current_check_index + 1) % num_keys # Point to the next one
+            # logger.debug(f"[LLM Call] Using API Key ID: {key_info.get('id', 'N/A')} (Index: {current_check_index})")
             return key_info # Return the whole dict
+        # else: logger.debug(f"[LLM Call] Skipping rate-limited key ID: {key_info.get('id', 'N/A')}")
 
-        # else: print(f"[LLM Call] Skipping rate-limited key ID: {key_info.get('id', 'N/A')}")
-
-    # If we loop through all keys and find none are valid
-    print("[LLM Call] Warning: All available API keys are currently rate-limited or none exist.")
+    logger.warning("[LLM Call] All available API keys are currently rate-limited or none exist.")
     return None
 
 # Custom retry condition: Retry on 429 (Rate Limit) and 5xx (Server Errors)
@@ -219,6 +220,49 @@ def should_retry(exception: BaseException) -> bool:
     # Retry on general request errors (network issues, timeouts)
     return isinstance(exception, httpx.RequestError)
 
+# Function to mark key used asynchronously
+async def _mark_key_used_task(key_id: Optional[int]):
+    if not key_id: return
+    session = None
+    try:
+        session = await get_worker_session()
+        await crud.mark_api_key_used_by_id(session, key_id)
+        await session.commit()
+    except Exception as e:
+        logger.error(f"Error marking key ID {key_id} as used: {e}", exc_info=True)
+        if session: await session.rollback()
+    finally:
+        if session: await session.close()
+
+# Function to update key status asynchronously
+async def _update_key_status_task(key_id: Optional[int], status: str, reason: str):
+    if not key_id: return
+    session = None
+    try:
+        session = await get_worker_session()
+        await crud.set_api_key_status_by_id(session, key_id, status, reason)
+        await session.commit()
+    except Exception as e:
+        logger.error(f"Error updating key ID {key_id} status to {status}: {e}", exc_info=True)
+        if session: await session.rollback()
+    finally:
+        if session: await session.close()
+
+# Function to set rate limit cooldown asynchronously
+async def _set_rate_limit_cooldown_task(key_id: Optional[int], cooldown_until: datetime.datetime, reason: str):
+    if not key_id: return
+    session = None
+    try:
+        session = await get_worker_session()
+        await crud.set_api_key_rate_limited(session, key_id, cooldown_until, reason)
+        await session.commit()
+    except Exception as e:
+        logger.error(f"Error setting rate limit for key ID {key_id}: {e}", exc_info=True)
+        if session: await session.rollback()
+    finally:
+        if session: await session.close()
+
+
 @retry(stop=stop_after_attempt(RETRY_ATTEMPTS), wait=RETRY_WAIT, retry=retry_if_exception(should_retry))
 async def call_llm_api(
     client: httpx.AsyncClient,
@@ -227,24 +271,21 @@ async def call_llm_api(
     image_data: Optional[str] = None # Optional base64 encoded image data
 ) -> Optional[Dict[str, Any]]:
     """
-    Calls the configured LLM API (specifically handles OpenRouter).
-    Uses the specified model, falling back to a default if needed.
-    Handles API key selection, rotation, rate limiting, and retries.
-    Attempts to parse JSON, falls back to raw inference string.
-    Supports optional image data for multimodal calls.
+    Calls the configured LLM API (handles OpenRouter). Handles key rotation, rate limiting, retries, multimodal input.
+    Returns parsed JSON or {'raw_inference': content}.
     """
     key_info = get_next_api_key()
     if not key_info:
-        print("[LLM Call] CRITICAL: No valid API Key available for LLM call.")
-        return None # No key, cannot proceed
+        logger.critical("[LLM Call] No valid API Key available for LLM call.")
+        return None
 
     api_key = key_info['key']
     key_id = key_info.get('id') # DB ID for status updates
+    key_suffix = api_key[-4:] if api_key else 'N/A'
 
     endpoint = None
     headers = {}
-    # Determine model: Use provided, fallback to standard, then premium as last resort
-    selected_model = model or settings.STANDARD_REPORT_MODEL or settings.PREMIUM_REPORT_MODEL or "google/gemini-1.5-flash-latest" # Ensure a final fallback
+    selected_model = model or settings.STANDARD_REPORT_MODEL or settings.PREMIUM_REPORT_MODEL or "google/gemini-1.5-flash-latest"
 
     # --- Configure based on LLM Provider ---
     if settings.LLM_PROVIDER == "openrouter":
@@ -252,16 +293,18 @@ async def call_llm_api(
         headers = {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
-            "HTTP-Referer": settings.HTTP_REFERER or settings.AGENCY_BASE_URL or "https://acumenis.ai", # Use setting or default
-            "X-Title": settings.X_TITLE or settings.PROJECT_NAME or "Acumenis", # Use setting or default
+            "HTTP-Referer": settings.HTTP_REFERER or settings.AGENCY_BASE_URL or "https://acumenis.ai",
+            "X-Title": settings.X_TITLE or settings.PROJECT_NAME or "Acumenis",
         }
-        # Construct messages payload, potentially including image data
+        # Construct messages payload
         messages = []
         content_parts = [{"type": "text", "text": prompt}]
-        if image_data and selected_model and 'vision' in selected_model or 'gemini-1.5-pro' in selected_model or 'gemini-1.5-flash' in selected_model: # Basic check for vision models
-            # Assuming base64 encoded image data, determine mime type (needs improvement)
-            # This is a basic guess, might need more robust mime type detection
-            mime_type = "image/jpeg" if image_data.startswith("/9j/") else "image/png" if image_data.startswith("iVBOR") else "image/jpeg"
+        # Basic check for known vision models or naming conventions
+        is_vision_model = selected_model and ('vision' in selected_model or 'gemini-1.5' in selected_model or 'gpt-4o' in selected_model)
+
+        if image_data and is_vision_model:
+            # Basic mime type detection (can be improved)
+            mime_type = "image/jpeg" if image_data.startswith("/9j/") else "image/png" if image_data.startswith("iVBOR") else "image/webp" if image_data.startswith("UklGR") else "image/gif" if image_data.startswith("R0lG") else "image/jpeg"
             messages.append({
                 "role": "user",
                 "content": [
@@ -274,48 +317,41 @@ async def call_llm_api(
                      }
                 ]
             })
-            print(f"[LLM Call] Including image data in request for model {selected_model}")
+            logger.info(f"[LLM Call] Including image data ({mime_type}) in request for model {selected_model}")
         else:
              messages.append({"role": "user", "content": prompt})
              if image_data:
-                  print(f"[LLM Call] WARNING: Image data provided but model '{selected_model}' might not support it. Sending text only.")
-
+                  logger.warning(f"[LLM Call] Image data provided but model '{selected_model}' might not support it or isn't recognized as vision-capable. Sending text only.")
 
         payload = {
             "model": selected_model,
             "messages": messages,
-            # Add optional parameters if needed
-            # "temperature": 0.7,
+            # "temperature": 0.7, # Example
             # "max_tokens": 4096, # Example
         }
-    # Add elif blocks here for other providers if needed
-    # elif settings.LLM_PROVIDER == "openai": ...
     else:
-        print(f"[LLM Call] Unsupported LLM_PROVIDER: {settings.LLM_PROVIDER}. Only 'openrouter' is explicitly handled.")
+        logger.error(f"[LLM Call] Unsupported LLM_PROVIDER: {settings.LLM_PROVIDER}.")
         return None
 
     # --- Make API Call ---
-    key_suffix = api_key[-4:] if api_key else 'N/A'
-    # print(f"[LLM Call] Sending request to {endpoint} using model {selected_model} with key ID {key_id or 'N/A'} (...{key_suffix})") # Reduce noise
+    logger.debug(f"[LLM Call] Sending request to {endpoint} using model {selected_model} with key ID {key_id or 'N/A'} (...{key_suffix})")
     last_exception = None
     try:
         response = await client.post(endpoint, headers=headers, json=payload, timeout=LLM_TIMEOUT)
-        response.raise_for_status() # Raises HTTPStatusError for 4xx/5xx
+        response.raise_for_status()
         result = response.json()
 
-        # Mark key as used *after* successful call (fire-and-forget)
-        if key_id: # Only if it's a key from the DB
-            asyncio.create_task(crud.mark_api_key_used_by_id(key_id))
+        # Mark key as used asynchronously
+        if key_id: asyncio.create_task(_mark_key_used_task(key_id))
 
         # --- Parse Response ---
         if "error" in result:
              error_details = result["error"]
-             print(f"[LLM Call] API returned error in body: {error_details}")
-             # Potentially mark key as inactive based on error type here
+             logger.error(f"[LLM Call] API returned error in body: {error_details}")
              error_str = str(error_details).lower()
-             if key_id and ('invalid api key' in error_str or 'authentication error' in error_str):
-                 print(f"[LLM Call] Deactivating key ID {key_id} due to API error: {error_details.get('message', 'Invalid Key')}")
-                 asyncio.create_task(crud.set_api_key_status_by_id(key_id, 'inactive', f"Invalid Key Error: {error_details.get('message', '')}"))
+             if key_id and ('invalid api key' in error_str or 'authentication error' in error_str or 'incorrect api key' in error_str):
+                 logger.warning(f"[LLM Call] Deactivating key ID {key_id} due to API error: {error_details.get('message', 'Invalid Key')}")
+                 asyncio.create_task(_update_key_status_task(key_id, 'inactive', f"Invalid Key Error: {error_details.get('message', '')[:200]}"))
              return None
 
         content = result.get("choices", [{}])[0].get("message", {}).get("content")
@@ -324,60 +360,52 @@ async def call_llm_api(
                 # Clean potential markdown ```json ... ``` blocks
                 cleaned_content = content.strip()
                 json_match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", cleaned_content, re.IGNORECASE | re.DOTALL)
-                if json_match:
-                    json_str = json_match.group(1).strip()
-                else:
-                    json_str = cleaned_content
-
-                # Attempt to parse as JSON
+                json_str = json_match.group(1).strip() if json_match else cleaned_content
                 parsed_json = json.loads(json_str)
                 return parsed_json
             except json.JSONDecodeError:
-                # If not JSON, return the raw string content wrapped in a dict
-                return {"raw_inference": content}
+                return {"raw_inference": content} # Return raw if not JSON
         else:
-             print(f"[LLM Call] No content found in LLM response choices: {result}")
+             logger.warning(f"[LLM Call] No content found in LLM response choices: {result}")
              return None
 
     except httpx.HTTPStatusError as e:
         last_exception = e
         status_code = e.response.status_code
-        print(f"[LLM Call] API request failed: Status {status_code} for model {selected_model} with key ID {key_id or 'N/A'} (...{key_suffix})")
-        try: error_body = e.response.json(); print(f"[LLM Call] Error Body: {error_body}")
-        except: print(f"[LLM Call] Error Body (non-JSON): {e.response.text[:200]}...")
+        error_text = e.response.text[:500] # Limit error text length
+        logger.warning(f"[LLM Call] API request failed: Status {status_code} for model {selected_model} with key ID {key_id or 'N/A'} (...{key_suffix}). Response: {error_text}...")
 
-        # Handle specific status codes
         if key_id: # Only update status for keys managed in DB
-            if status_code in [401, 403]: # Unauthorized or Forbidden
-                 print(f"[LLM Call] Deactivating key ID {key_id} due to {status_code} error.")
-                 asyncio.create_task(crud.set_api_key_status_by_id(key_id, 'inactive', f"API Error {status_code}"))
-            elif status_code == 429: # Rate limited
-                 print(f"[LLM Call] Rate limit hit for key ID {key_id}. Marking as rate-limited.")
+            if status_code in [401, 403]:
+                 logger.warning(f"[LLM Call] Deactivating key ID {key_id} due to {status_code} error.")
+                 asyncio.create_task(_update_key_status_task(key_id, 'inactive', f"API Error {status_code}"))
+            elif status_code == 429:
+                 logger.warning(f"[LLM Call] Rate limit hit for key ID {key_id}. Marking as rate-limited for {RATE_LIMIT_COOLDOWN_SECONDS}s.")
                  cooldown_until = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(seconds=RATE_LIMIT_COOLDOWN_SECONDS)
-                 asyncio.create_task(crud.set_api_key_rate_limited(key_id, cooldown_until, f"API Error {status_code}"))
-                 # Update local cache immediately to prevent reuse in this cycle
+                 asyncio.create_task(_set_rate_limit_cooldown_task(key_id, cooldown_until, f"API Error {status_code}"))
+                 # Update local cache immediately
                  for k in AVAILABLE_API_KEYS:
                      if k.get('id') == key_id:
-                         k['rate_limited_until'] = cooldown_until
-                         break
+                         k['rate_limited_until'] = cooldown_until; break
+            # Consider other codes? 400 Bad Request might indicate prompt issues, not key issues.
+            # 5xx errors are retried by tenacity.
 
         raise e # Re-raise to trigger tenacity retry if applicable
     except httpx.RequestError as e:
         last_exception = e
-        print(f"[LLM Call] Network or Request Error: {e}")
-        raise e
+        logger.error(f"[LLM Call] Network or Request Error: {e}")
+        raise e # Trigger retry
     except RetryError as e:
-        # This is caught after all retry attempts fail
-        print(f"[LLM Call] API call failed after {RETRY_ATTEMPTS} attempts for model {selected_model}. Last exception: {e.last_attempt.exception()}")
+        logger.error(f"[LLM Call] API call failed after {RETRY_ATTEMPTS} attempts for model {selected_model}. Last exception: {e.last_attempt.exception()}")
         # Deactivate the key that failed the last attempt if it was a 401/403
-        if key_id and isinstance(e.last_attempt.exception(), httpx.HTTPStatusError):
-             status_code = e.last_attempt.exception().response.status_code
+        last_exc = e.last_attempt.exception()
+        if key_id and isinstance(last_exc, httpx.HTTPStatusError):
+             status_code = last_exc.response.status_code
              if status_code in [401, 403]:
-                  print(f"[LLM Call] Deactivating key ID {key_id} after exhausting retries due to {status_code}.")
-                  asyncio.create_task(crud.set_api_key_status_by_id(key_id, 'inactive', f"API Error {status_code} after retries"))
+                  logger.warning(f"[LLM Call] Deactivating key ID {key_id} after exhausting retries due to {status_code}.")
+                  asyncio.create_task(_update_key_status_task(key_id, 'inactive', f"API Error {status_code} after retries"))
         return None
     except Exception as e:
         last_exception = e
-        print(f"[LLM Call] Unexpected error calling API: {e}")
-        traceback.print_exc()
+        logger.error(f"[LLM Call] Unexpected error calling API: {e}", exc_info=True)
         return None
