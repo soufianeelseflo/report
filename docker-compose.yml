@@ -2,16 +2,17 @@ version: '3.8'
 
 services:
   db:
-    image: postgres:15-alpine # Using alpine for smaller image size
-    container_name: acumenis_db # UPDATED NAME
+    image: postgres:15-alpine
+    container_name: acumenis_prime_db # Renamed
     volumes:
       - postgres_data:/var/lib/postgresql/data
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:-acumenisdb} # UPDATED DEFAULT
-      POSTGRES_USER: ${POSTGRES_USER:-acumenisuser} # UPDATED DEFAULT
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-supersecretpassword} # Ensure this matches .env
-    ports:
-      - "${POSTGRES_PORT:-5432}:5432" # Expose DB port only if needed externally
+      # These MUST be set in Coolify secrets/env vars
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    # ports: # Do not expose DB publicly unless necessary
+    #   - "${POSTGRES_PORT:-5432}:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 10s
@@ -19,20 +20,73 @@ services:
       retries: 5
     restart: unless-stopped
 
-  app:
+  odr-service: # New service for open-deep-research
     build:
-      context: . # Build context is the root directory containing Dockerfile, Acumenis, open-deep-research
-      dockerfile: Dockerfile # Dockerfile is now at the root
-    container_name: acumenis_app # UPDATED NAME
+      context: .
+      dockerfile: Dockerfile # Uses the same Dockerfile base
+    container_name: acumenis_prime_odr # Renamed
+    working_dir: /app/open-deep-research-main
+    # Command to build and start the Next.js app
+    # Note: Building here might be slow; pre-building in Dockerfile is better if possible
+    command: sh -c "npm install --omit=dev --legacy-peer-deps && npm run build && npm start -p 3000"
+    restart: unless-stopped
+    depends_on:
+      - db # ODR might not directly need DB, but good practice
+    environment:
+      # Pass necessary API keys for ODR's operation (if it uses env vars)
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-} # Example, adjust based on ODR needs
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      AZURE_SUB_KEY: ${AZURE_SUB_KEY:-}
+      GOOGLE_SEARCH_API_KEY: ${GOOGLE_SEARCH_API_KEY:-}
+      GOOGLE_SEARCH_CX: ${GOOGLE_SEARCH_CX:-}
+      EXA_API_KEY: ${EXA_API_KEY:-}
+      # Ensure it listens on all interfaces inside the container
+      HOST: '0.0.0.0'
+      PORT: '3000'
+    # ports: # Only expose if needed externally, usually not for internal service
+    #   - "3000:3000"
+
+  app: # Main Acumenis FastAPI App
+    build:
+      context: .
+      dockerfile: Dockerfile # Uses the same Dockerfile base
+    container_name: acumenis_prime_app # Renamed
     env_file:
-      - .env # .env file is now at the root
+      - .env # Load base .env if present
+    environment:
+      # Override or set all required variables via Coolify secrets/env vars
+      POSTGRES_SERVER: db # Service name from docker-compose
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      LEMONSQUEEZY_API_KEY: ${LEMONSQUEEZY_API_KEY}
+      LEMONSQUEEZY_STORE_ID: ${LEMONSQUEEZY_STORE_ID}
+      LEMONSQUEEZY_VARIANT_STANDARD: ${LEMONSQUEEZY_VARIANT_STANDARD}
+      LEMONSQUEEZY_VARIANT_PREMIUM: ${LEMONSQUEEZY_VARIANT_PREMIUM}
+      LEMONSQUEEZY_WEBHOOK_SECRET: ${LEMONSQUEEZY_WEBHOOK_SECRET}
+      AGENCY_BASE_URL: ${AGENCY_BASE_URL} # CRITICAL: Set public URL
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY} # CRITICAL: Set strong key
+      LLM_PROVIDER: ${LLM_PROVIDER:-openrouter}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-} # Fallback
+      PROXY_URL: ${PROXY_URL:-}
+      PROXY_LIST: ${PROXY_LIST:-} # Comma-separated if using list
+      KEY_ACQUIRER_RUN_ON_STARTUP: "True" # Force activation
+      # Add any other necessary env vars from config.py
+      # Point agents to the internal ODR service:
+      OPEN_DEEP_RESEARCH_SERVICE_URL: "http://odr-service:3000" # Agents will use this
     depends_on:
       db:
-        condition: service_healthy # Wait for db healthcheck to pass
+        condition: service_healthy
+      odr-service: # Make app wait for ODR service (basic check, no healthcheck defined for ODR)
+         condition: service_started
     ports:
-      - "8000:8000" # Map host port 8000 to container port 8000
+      - "8000:8000" # Expose FastAPI app port
     restart: unless-stopped
-    # The command is now handled by the ENTRYPOINT script in the Dockerfile
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"] # Example with 4 workers
 
 volumes:
   postgres_data:

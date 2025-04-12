@@ -1,20 +1,33 @@
+# autonomous_agency/app/db/crud.py
 
 import json
 import logging # Use standard logging
 from typing import Optional, List, Dict, Any, Union
+import datetime # Ensure datetime is imported
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy import func, cast, Float, Integer as SQLInteger, text, update, delete, Text as SQLText
 
 # Corrected relative imports for package structure
-from . import models
-from Acumenis.app.api import schemas # Assuming schemas is here
-from Acumenis.app.core.config import settings # Import settings for variant IDs, etc.
-from Acumenis.app.core.security import encrypt_data, decrypt_data # Import encryption functions
-from .models import ( # Import all relevant models
-    KpiSnapshot, McolDecisionLog, ReportRequest, Prospect, EmailAccount, ApiKey, AgentTask
-)
+try:
+    from . import models
+    # Ensure schemas are imported correctly if needed, adjust path if necessary
+    # from Acumenis.app.api import schemas
+    from Acumenis.app.core.config import settings # Import settings for variant IDs, etc.
+    from Acumenis.app.core.security import encrypt_data, decrypt_data # Import encryption functions
+    from .models import ( # Import all relevant models
+        KpiSnapshot, McolDecisionLog, ReportRequest, Prospect, EmailAccount, ApiKey, AgentTask
+    )
+except ImportError:
+    print("[CRUD] WARNING: Using fallback imports. Ensure package structure is correct for deployment.")
+    from app.db import models
+    from app.core.config import settings
+    from app.core.security import encrypt_data, decrypt_data
+    from app.db.models import (
+        KpiSnapshot, McolDecisionLog, ReportRequest, Prospect, EmailAccount, ApiKey, AgentTask
+    )
+
 
 # Setup logger
 logger = logging.getLogger(__name__)
@@ -86,6 +99,27 @@ async def get_report_request(db: AsyncSession, request_id: int) -> Optional[mode
      result = await db.execute(select(models.ReportRequest).where(models.ReportRequest.request_id == request_id))
      return result.scalars().first()
 
+# --- MODIFICATION: Add get_pending_report_request ---
+async def get_pending_report_request(db: AsyncSession) -> Optional[models.ReportRequest]:
+    """
+    Gets the next report request with status 'AWAITING_GENERATION'
+    and locks it for processing.
+    """
+    stmt = (
+        select(models.ReportRequest)
+        .where(models.ReportRequest.status == 'AWAITING_GENERATION')
+        .order_by(models.ReportRequest.created_at.asc()) # Process oldest first
+        .limit(1)
+        .with_for_update(skip_locked=True) # Lock the row
+    )
+    result = await db.execute(stmt)
+    request = result.scalars().first()
+    if request:
+        logger.info(f"Fetched pending ReportRequest ID {request.request_id} for processing.")
+    return request
+# --- END MODIFICATION ---
+
+
 async def update_report_request_status(
     db: AsyncSession,
     request_id: int,
@@ -116,7 +150,8 @@ async def update_report_request_status(
 
 
 # --- Prospect CRUD ---
-async def create_prospect(
+# --- MODIFICATION: Replace create_prospect with create_or_update_prospect ---
+async def create_or_update_prospect(
     db: AsyncSession,
     company_name: str,
     email: Optional[str] = None,
@@ -124,58 +159,63 @@ async def create_prospect(
     pain_point: Optional[str] = None,
     source: Optional[str] = None,
     linkedin_url: Optional[str] = None,
-    executives: Optional[Dict] = None
+    executives: Optional[Dict] = None,
+    status_if_new: str = "NEW" # Status to set only if creating a new prospect
 ) -> Optional[models.Prospect]:
-    """Creates or updates a prospect based on email or company name."""
-    existing = None
-    if email:
-        existing = await db.scalar(select(models.Prospect).where(models.Prospect.contact_email == email))
-
-    if not existing and company_name:
-         existing = await db.scalar(select(models.Prospect).where(models.Prospect.company_name == company_name))
+    """
+    Creates a new prospect or updates an existing one based on company name.
+    Prioritizes updating existing records over creating duplicates.
+    Only sets status if creating a new record.
+    """
+    # Try to find existing prospect by company name first
+    existing = await db.scalar(select(models.Prospect).where(models.Prospect.company_name == company_name))
 
     if existing:
-        # Update existing prospect
-        update_data = {
-            'company_name': company_name or existing.company_name,
-            'website': website or existing.website,
-            'contact_email': email or existing.contact_email,
-            'potential_pain_point': pain_point or existing.potential_pain_point,
-            'source': source or existing.source,
-            'linkedin_profile_url': linkedin_url or existing.linkedin_profile_url,
-            'key_executives': executives if executives else existing.key_executives,
-            'updated_at': func.now()
-        }
-        # Only update status if it's currently NEW and a valid email is provided/updated
-        if existing.status == 'NEW' and update_data.get('contact_email'):
-             pass # Keep status NEW if email is present
-        elif not update_data.get('contact_email'):
-             # If email is removed or was never there, maybe mark differently? Or keep NEW? Keep NEW for now.
-             pass
+        # Update existing prospect if new information is provided
+        update_data = {}
+        if website and website != existing.website: update_data['website'] = website
+        if email and email != existing.contact_email: update_data['contact_email'] = email
+        if pain_point and pain_point != existing.potential_pain_point: update_data['potential_pain_point'] = pain_point
+        if source and source != existing.source: update_data['source'] = source
+        if linkedin_url and linkedin_url != existing.linkedin_profile_url: update_data['linkedin_profile_url'] = linkedin_url
+        if executives and executives != existing.key_executives: update_data['key_executives'] = executives
 
-        stmt = (
-            update(models.Prospect)
-            .where(models.Prospect.prospect_id == existing.prospect_id)
-            .values(**update_data)
-            .execution_options(synchronize_session="fetch")
-            .returning(models.Prospect)
-        )
-        result = await db.execute(stmt)
-        updated_prospect = result.scalar_one_or_none()
-        logger.info(f"Updated existing prospect: {updated_prospect.contact_email or updated_prospect.company_name} (ID: {updated_prospect.prospect_id})")
-        return updated_prospect
+        # Only update if there's new data
+        if update_data:
+            update_data['updated_at'] = func.now()
+            stmt = (
+                update(models.Prospect)
+                .where(models.Prospect.prospect_id == existing.prospect_id)
+                .values(**update_data)
+                .execution_options(synchronize_session="fetch")
+                .returning(models.Prospect)
+            )
+            result = await db.execute(stmt)
+            updated_prospect = result.scalar_one_or_none()
+            logger.info(f"Updated existing prospect: {updated_prospect.company_name} (ID: {updated_prospect.prospect_id})")
+            return updated_prospect
+        else:
+            logger.info(f"No new information to update for existing prospect: {company_name} (ID: {existing.prospect_id})")
+            return existing # Return existing if no updates needed
     else:
         # Create new prospect
         db_prospect = models.Prospect(
-            company_name=company_name, website=website, contact_email=email,
-            potential_pain_point=pain_point, source=source, status="NEW",
-            linkedin_profile_url=linkedin_url, key_executives=executives
+            company_name=company_name,
+            website=website,
+            contact_email=email,
+            potential_pain_point=pain_point,
+            source=source,
+            status=status_if_new, # Use the provided status only when creating
+            linkedin_profile_url=linkedin_url,
+            key_executives=executives
         )
         db.add(db_prospect)
         await db.flush()
         await db.refresh(db_prospect)
-        logger.info(f"Created new prospect: {db_prospect.company_name} (ID: {db_prospect.prospect_id})")
+        logger.info(f"Created new prospect: {db_prospect.company_name} (ID: {db_prospect.prospect_id}) with status {status_if_new}")
         return db_prospect
+# --- END MODIFICATION ---
+
 
 async def get_new_prospects_for_emailing(db: AsyncSession, limit: int) -> list[models.Prospect]:
     """Gets NEW prospects ready for emailing, prioritizing those with emails and locking them."""
@@ -535,6 +575,35 @@ async def get_active_api_keys(db: AsyncSession, provider: str) -> List[str]:
 
     return decrypted_keys
 
+# --- MODIFICATION: Add get_active_api_keys_with_details ---
+async def get_active_api_keys_with_details(db: AsyncSession, provider: str) -> List[Dict[str, Any]]:
+    """Retrieves details (id, encrypted key, rate limit) of active API keys."""
+    stmt = select(
+        models.ApiKey.id,
+        models.ApiKey.api_key_encrypted,
+        models.ApiKey.rate_limited_until # Assuming this column exists
+    ).where(models.ApiKey.provider == provider).where(models.ApiKey.status == 'active')
+    result = await db.execute(stmt)
+    # Convert rows to dictionaries
+    keys_details = [
+        {"id": row.id, "api_key_encrypted": row.api_key_encrypted, "rate_limited_until": getattr(row, 'rate_limited_until', None)}
+        for row in result.all()
+    ]
+    return keys_details
+# --- END MODIFICATION ---
+
+# --- MODIFICATION: Add count_active_api_keys ---
+async def count_active_api_keys(db: AsyncSession, provider: str) -> int:
+    """Counts the number of active API keys for a given provider."""
+    stmt = select(func.count(models.ApiKey.id))\
+        .where(models.ApiKey.provider == provider)\
+        .where(models.ApiKey.status == 'active')
+    result = await db.execute(stmt)
+    count = result.scalar_one_or_none()
+    return count or 0
+# --- END MODIFICATION ---
+
+
 async def set_api_key_status_by_id(db: AsyncSession, key_id: int, status: str, reason: Optional[str] = None) -> bool:
     """Updates the status and failure reason/count of an API key identified by its database ID."""
     db_key = await db.get(models.ApiKey, key_id)
@@ -594,23 +663,47 @@ async def set_api_key_inactive(db: AsyncSession, key_to_deactivate: str, provide
      """Convenience function to mark a key as inactive by its value."""
      return await set_api_key_status_by_value(db, key_value=key_to_deactivate, provider=provider, status='inactive', reason=reason)
 
-async def mark_api_key_used(db: AsyncSession, key_value: str, provider: str) -> bool:
-    """Updates the last_used_at timestamp for a given API key value."""
-    target_key_id = await find_api_key_id_by_value(db, key_value, provider)
-    if target_key_id:
-        stmt = (
-            update(models.ApiKey)
-            .where(models.ApiKey.id == target_key_id)
-            .values(last_used_at=func.now())
-            .execution_options(synchronize_session="fetch") # Keep session consistent
-        )
-        await db.execute(stmt)
-        # logger.debug(f"Marked API Key ID {target_key_id} as used.") # Debug level
+# --- MODIFICATION: Add mark_api_key_used_by_id ---
+async def mark_api_key_used_by_id(db: AsyncSession, key_id: int) -> bool:
+    """Updates the last_used_at timestamp for a given API key ID."""
+    stmt = (
+        update(models.ApiKey)
+        .where(models.ApiKey.id == key_id)
+        .values(last_used_at=func.now())
+        .execution_options(synchronize_session="fetch") # Keep session consistent
+    )
+    result = await db.execute(stmt)
+    if result.rowcount > 0:
+        # logger.debug(f"Marked API Key ID {key_id} as used.") # Debug level
         return True
     else:
-        # This might happen if the key was deactivated between selection and use.
-        logger.warning(f"API Key matching value for provider '{provider}' not found for 'mark_api_key_used'.")
+        logger.warning(f"API Key ID {key_id} not found for 'mark_api_key_used_by_id'.")
         return False
+# --- END MODIFICATION ---
+
+# --- MODIFICATION: Add set_api_key_rate_limited ---
+async def set_api_key_rate_limited(db: AsyncSession, key_id: int, cooldown_until: datetime.datetime, reason: str) -> bool:
+    """Sets the rate_limited_until timestamp and updates status."""
+    stmt = (
+        update(models.ApiKey)
+        .where(models.ApiKey.id == key_id)
+        .values(
+            status='rate_limited', # Set status explicitly
+            rate_limited_until=cooldown_until,
+            last_failure_reason=f"Rate Limited: {reason[:200]}", # Store reason
+            updated_at=func.now()
+        )
+        .execution_options(synchronize_session="fetch")
+    )
+    result = await db.execute(stmt)
+    if result.rowcount > 0:
+        logger.info(f"Marked API Key ID {key_id} as rate-limited until {cooldown_until}. Reason: {reason}")
+        return True
+    else:
+        logger.warning(f"API Key ID {key_id} not found for setting rate limit.")
+        return False
+# --- END MODIFICATION ---
+
 
 # --- Agent Task CRUD ---
 async def create_agent_task(
@@ -708,3 +801,25 @@ async def get_task(db: AsyncSession, task_id: int) -> Optional[models.AgentTask]
 #     # event = models.SystemEvent(agent_name=agent, event_type=event_type, details=details)
 #     # db.add(event)
 #     # await db.flush()
+
+# --- MODIFICATION: Add function to update dynamic config (Example) ---
+# This assumes you create a simple key-value table for dynamic settings
+# async def update_dynamic_config(db: AsyncSession, key: str, value: Any) -> bool:
+#     """Updates a dynamic configuration value in the database."""
+#     # Example: Assumes a table 'dynamic_config' with 'config_key' and 'config_value' (JSON?)
+#     # Implement proper upsert logic based on your DB model for dynamic config
+#     logger.info(f"MCOL attempting to update config: {key} = {value}")
+#     # Placeholder: Replace with actual DB update logic
+#     # try:
+#     #     stmt = upsert(...).values(config_key=key, config_value=json.dumps(value))
+#     #     await db.execute(stmt)
+#     #     await db.commit() # Commit immediately? Or let MCOL cycle commit?
+#     #     logger.info(f"Successfully updated dynamic config '{key}'.")
+#     #     # Need mechanism to signal relevant agents/app to reload config
+#     #     return True
+#     # except Exception as e:
+#     #     logger.error(f"Failed to update dynamic config '{key}': {e}")
+#     #     await db.rollback()
+#     #     return False
+#     return True # Placeholder success
+# --- END MODIFICATION ---

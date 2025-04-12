@@ -1,4 +1,3 @@
-
 # autonomous_agency/app/main.py
 from fastapi import FastAPI, Depends, Request, HTTPException, status
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
@@ -10,23 +9,27 @@ import signal
 import os
 import logging
 from sqlalchemy.sql import text # For DB check
+from sqlalchemy.ext.asyncio import AsyncSession # Added for startup key check
+from typing import Dict # Added for worker_tasks type hint
 
 # Corrected imports for new structure
 try:
     from Acumenis.app.core.config import settings
     from Acumenis.app.api.endpoints import payments as api_payments
     from Acumenis.app.db.base import engine as async_engine, Base as db_base, get_worker_session
-    from Acumenis.app.db import models, crud
+    from Acumenis.app.db import models, crud # Import crud
     from Acumenis.app.api import schemas
-    from Acumenis.app.agents.agent_utils import load_and_update_api_keys, start_key_refresh_task, _key_refresh_task # Import key utils and task handle
+    # Import key utils, task handle, and AVAILABLE_API_KEYS for startup check
+    from Acumenis.app.agents.agent_utils import load_and_update_api_keys, start_key_refresh_task, _key_refresh_task, AVAILABLE_API_KEYS, _keys_loaded # Added _keys_loaded
 except ImportError:
     print("[MainApp] WARNING: Using fallback imports. Ensure package structure is correct for deployment.")
     from app.core.config import settings
     from app.api.endpoints import payments as api_payments
     from app.db.base import engine as async_engine, Base as db_base, get_worker_session
-    from app.db import models, crud
+    from app.db import models, crud # Import crud
     from app.api import schemas
-    from app.agents.agent_utils import load_and_update_api_keys, start_key_refresh_task, _key_refresh_task
+    # Import key utils, task handle, and AVAILABLE_API_KEYS for startup check
+    from app.agents.agent_utils import load_and_update_api_keys, start_key_refresh_task, _key_refresh_task, AVAILABLE_API_KEYS, _keys_loaded # Added _keys_loaded
 
 # Setup logger
 logger = logging.getLogger(__name__)
@@ -157,6 +160,11 @@ def _import_runners():
         except ImportError:
              logger.critical("CRITICAL: Failed even fallback imports for worker runners.")
 
+async def _start_worker_task(worker_name: str, runner_func: callable):
+    """Helper to create and store worker task."""
+    task = asyncio.create_task(runner_func(shutdown_event), name=f"worker_{worker_name}")
+    worker_tasks[worker_name] = task
+    logger.info(f"Started worker: {worker_name}")
 
 @control_router.post("/start/{worker_name}", status_code=status.HTTP_200_OK)
 async def start_worker(worker_name: str):
@@ -169,16 +177,14 @@ async def start_worker(worker_name: str):
         logger.error(f"Worker '{worker_name}' not found in WORKER_RUNNERS.")
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Worker '{worker_name}' not found.")
 
-    # Special check for KeyAcquirer
-    if worker_name == "key_acquirer" and not getattr(settings, 'KEY_ACQUIRER_RUN_ON_STARTUP', False):
-         logger.warning("Attempted to start Key Acquirer, but it's disabled in settings (KEY_ACQUIRER_RUN_ON_STARTUP=false).")
-         raise HTTPException(status_code=400, detail="Key Acquirer is disabled in settings.")
+    # Removed special check for KeyAcquirer - will rely on startup logic now
+    # if worker_name == "key_acquirer" and not getattr(settings, 'KEY_ACQUIRER_RUN_ON_STARTUP', False):
+    #      logger.warning("Attempted to start Key Acquirer via API, but it's disabled in settings (KEY_ACQUIRER_RUN_ON_STARTUP=false).")
+    #      raise HTTPException(status_code=400, detail="Key Acquirer is disabled in settings.")
 
     try:
         runner_func = WORKER_RUNNERS[worker_name]
-        task = asyncio.create_task(runner_func(shutdown_event), name=f"worker_{worker_name}")
-        worker_tasks[worker_name] = task
-        logger.info(f"Started worker: {worker_name}")
+        await _start_worker_task(worker_name, runner_func) # Use helper
         return {"message": f"Worker '{worker_name}' started."}
     except Exception as e:
         logger.error(f"Error starting worker {worker_name}: {e}", exc_info=True)
@@ -277,6 +283,22 @@ async def startup_event():
     logger.info("Starting background API key refresh task...")
     start_key_refresh_task() # Start the periodic refresh
 
+    # --- MODIFICATION: Conditionally start KeyAcquirer ---
+    if settings.KEY_ACQUIRER_RUN_ON_STARTUP:
+        logger.info("KEY_ACQUIRER_RUN_ON_STARTUP is True. Checking initial key count...")
+        # Check if we have enough keys already
+        if len(AVAILABLE_API_KEYS) < settings.KEY_ACQUIRER_TARGET_COUNT:
+            logger.info(f"Key count ({len(AVAILABLE_API_KEYS)}) is below target ({settings.KEY_ACQUIRER_TARGET_COUNT}). Starting Key Acquirer worker...")
+            if "key_acquirer" in WORKER_RUNNERS:
+                await _start_worker_task("key_acquirer", WORKER_RUNNERS["key_acquirer"])
+            else:
+                logger.error("Key Acquirer runner function not found, cannot start worker.")
+        else:
+            logger.info(f"Sufficient keys ({len(AVAILABLE_API_KEYS)}) already available. Key Acquirer will not start automatically.")
+    else:
+        logger.info("KEY_ACQUIRER_RUN_ON_STARTUP is False. Key Acquirer will not start automatically.")
+    # --- END MODIFICATION ---
+
     logger.info(f"API Ready. Acumenis Interface at {settings.AGENCY_BASE_URL}/. Control Panel at /ui.")
     logger.warning("Operating in high-risk, aggressive 'Victory Mandate' mode.")
 
@@ -332,4 +354,3 @@ if __name__ == "__main__":
         reload=False, # Production: False
         workers=1 # Production: Consider increasing based on load, but manage shared state carefully
     )
-

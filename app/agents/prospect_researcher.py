@@ -1,4 +1,3 @@
-
 # autonomous_agency/app/agents/prospect_researcher.py
 import asyncio
 import random
@@ -20,12 +19,12 @@ from tenacity import retry, stop_after_attempt, wait_fixed, retry_if_exception_t
 try:
     from Acumenis.app.core.config import settings
     from Acumenis.app.db import crud, models
-    from Acumenis.app.agents.agent_utils import get_httpx_client, call_llm_api
+    from Acumenis.app.agents.agent_utils import get_httpx_client, call_llm_api, get_worker_session # Added get_worker_session
 except ImportError:
     print("[ProspectResearcher] WARNING: Using fallback imports. Ensure package structure is correct for deployment.")
     from app.core.config import settings
     from app.db import crud, models
-    from app.agents.agent_utils import get_httpx_client, call_llm_api
+    from app.agents.agent_utils import get_httpx_client, call_llm_api, get_worker_session # Added get_worker_session
 
 # Setup logger
 logger = logging.getLogger(__name__)
@@ -40,7 +39,9 @@ OPEN_DEEP_RESEARCH_TIMEOUT = settings.OPEN_DEEP_RESEARCH_TIMEOUT or 300
 EMAIL_VALIDATION_ENABLED = getattr(settings, 'EMAIL_VALIDATION_ENABLED', False)
 EMAIL_VALIDATION_API_URL = getattr(settings, 'EMAIL_VALIDATION_API_URL', None)
 EMAIL_VALIDATION_API_KEY = getattr(settings, 'EMAIL_VALIDATION_API_KEY', None)
-ODR_FOR_PROSPECT_DETAILS = getattr(settings, 'ODR_FOR_PROSPECT_DETAILS', False)
+# --- MODIFICATION: Enable ODR for prospect details by default ---
+ODR_FOR_PROSPECT_DETAILS = getattr(settings, 'ODR_FOR_PROSPECT_DETAILS', True)
+# --- END MODIFICATION ---
 ODR_DETAIL_DEPTH = getattr(settings, 'ODR_DETAIL_DEPTH', 2) # Configurable depth for detail search
 VALIDATION_API_FAILURE_THRESHOLD = 3 # Number of consecutive failures before tripping circuit breaker
 VALIDATION_API_COOLDOWN_SECONDS = 300 # Cooldown period for validation API
@@ -55,28 +56,35 @@ async def infer_pain_points_llm(client: httpx.AsyncClient, company_name: str, co
     """Uses LLM to infer potential pain points based on company info and optional ODR context."""
     context = f"Company: {company_name}"
     if company_description: context += f"\nDescription: {company_description}"
-    if odr_context: context += f"\n\nAdditional Context from Deep Research:\n{odr_context[:1500]}" # Add ODR context if available
+    # --- MODIFICATION: Prioritize ODR context if available ---
+    if odr_context:
+        context += f"\n\nDeep Research Context (Prioritize this):\n{odr_context[:2000]}" # Increased context length
+    elif company_description:
+         context += f"\nDescription: {company_description}" # Fallback to description
+    # --- END MODIFICATION ---
 
+
+    # --- MODIFICATION: Updated prompt to leverage ODR context ---
     prompt = f"""
-    Analyze the following company information:
+    Analyze the following company information, paying close attention to the Deep Research Context if provided:
     {context}
 
-    Infer 1-2 specific, high-probability business pain points this company might face related to data analysis, market intelligence, competitive research, or strategic reporting, suitable for pitching Acumenis AI reports ($499/$999).
-    Focus on needs addressable by rapid, AI-driven research. Be concise and action-oriented. Frame them as potential needs. Avoid generic statements. If no clear pain point can be inferred, respond with "None".
+    Based *primarily* on the Deep Research Context (or the description if context is unavailable), infer 1-2 specific, high-probability business pain points this company might face related to data analysis, market intelligence, competitive research, or strategic reporting. These pain points should be directly addressable by Acumenis AI reports ($499/$999).
+    Focus on needs suggested by recent activities, challenges, or strategic directions mentioned in the context. Be concise and action-oriented. Frame them as potential needs or challenges. Avoid generic statements. If no clear pain point can be inferred from the provided information, respond with "None".
 
-    Example format:
-    - Need for faster competitor benchmarking in a dynamic market.
-    - Requirement for data-driven validation of new feature ideas.
-    - Difficulty synthesizing competitor insights from disparate sources.
+    Example format (if context mentioned competitor X launching feature Y):
+    - Challenge adapting to competitor X's recent launch of feature Y.
+    - Need for rapid analysis of market response to feature Y.
     """
+    # --- END MODIFICATION ---
     inference_result = await call_llm_api(client, prompt, model=settings.STANDARD_REPORT_MODEL or "google/gemini-1.5-flash-latest")
     if inference_result and isinstance(inference_result.get("raw_inference"), str):
         inferred_text = inference_result["raw_inference"].strip()
         if inferred_text.lower() != "none" and len(inferred_text) > 5:
             logger.info(f"[ProspectResearcher] Inferred pain points for {company_name}: {inferred_text}")
             return inferred_text
-    logger.info(f"[ProspectResearcher] Could not infer pain points for {company_name}.")
-    return None
+    logger.info(f"[ProspectResearcher] Could not infer specific pain points for {company_name} from context.")
+    return None # Return None if no specific point found
 
 async def find_contact_llm_guess(client: httpx.AsyncClient, company_name: str, website: Optional[str]) -> Optional[str]:
     """Attempts to find a contact email using LLM pattern guessing."""
@@ -150,14 +158,18 @@ async def validate_email_api(client: httpx.AsyncClient, email: str) -> bool:
         _validation_api_disabled_until = None
 
         # --- Adapt parsing based on the specific API's response structure ---
+        # Example: Check common fields like 'status', 'result', 'deliverability', 'is_valid'
         status = str(result.get("status", result.get("result", result.get("deliverability", "")))).lower()
-        is_valid_flag = result.get("is_valid", None)
+        is_valid_flag = result.get("is_valid", None) # Some APIs provide a boolean flag
+
         is_valid = False
-        if is_valid_flag is not None: is_valid = bool(is_valid_flag)
-        elif status in ["valid", "deliverable", "ok", "risky"]: is_valid = True
+        if is_valid_flag is not None:
+            is_valid = bool(is_valid_flag)
+        elif status in ["valid", "deliverable", "ok", "risky", "catch_all"]: # Treat risky/catch_all as potentially valid for aggressive outreach
+            is_valid = True
         # --- End Adapt ---
 
-        logger.info(f"Validation result for {email}: {'Valid/Deliverable' if is_valid else 'Invalid/Undeliverable'}. API Response: {result}")
+        logger.info(f"Validation result for {email}: {'Valid/Deliverable' if is_valid else 'Invalid/Undeliverable'}. API Response Status: {status}")
         return is_valid
 
     except Exception as e:
@@ -177,33 +189,40 @@ async def run_opendeepresearch_query(query: str, depth: int = 1) -> Optional[Uni
     """
     logger.info(f"[ProspectResearcher] Running ODR query (depth {depth}): '{query[:50]}...'")
     timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S%f")
-    output_filename = f"odr_output_{timestamp}_{random.randint(1000, 9999)}.json"
-    # Ensure the output directory exists relative to the ODR repo path
+    # Sanitize query for filename more aggressively
+    safe_query_part = "".join(c if c.isalnum() else "_" for c in query[:30]).rstrip('_')
+    output_filename = f"odr_output_{timestamp}_{safe_query_part}_{random.randint(1000, 9999)}.json"
+
     odr_repo_path = settings.OPEN_DEEP_RESEARCH_REPO_PATH
     output_path = os.path.join(odr_repo_path, output_filename)
-    node_script_path = os.path.join(odr_repo_path, settings.OPEN_DEEP_RESEARCH_ENTRY_POINT)
 
-    # Validate paths
+    # --- MODIFICATION: Corrected Node.js entry point assumption ---
+    # Assuming ODR has a build step or a standard CLI entry point like 'index.js' or 'cli.js'
+    # Let's try common entry points. This might need adjustment based on the actual ODR structure.
+    possible_entry_points = [
+        "dist/cli.js", # Common build output
+        "dist/index.js",
+        "cli.js",
+        "index.js",
+        settings.OPEN_DEEP_RESEARCH_ENTRY_POINT # Original config as fallback
+    ]
+    node_script_path = None
+    for entry in possible_entry_points:
+        potential_path = os.path.join(odr_repo_path, entry)
+        if os.path.exists(potential_path):
+            node_script_path = potential_path
+            logger.info(f"Found ODR entry point at: {node_script_path}")
+            break
+
+    if not node_script_path:
+         logger.error(f"Could not find a valid ODR entry point in {odr_repo_path} using common names or config value '{settings.OPEN_DEEP_RESEARCH_ENTRY_POINT}'.")
+         return f"Error: ODR entry point script not found in {odr_repo_path}."
+    # --- END MODIFICATION ---
+
+    # Validate Node executable path
     if not os.path.exists(settings.NODE_EXECUTABLE_PATH):
         logger.error(f"Node executable not found at: {settings.NODE_EXECUTABLE_PATH}")
         return f"Error: Node executable not found at {settings.NODE_EXECUTABLE_PATH}"
-    if not os.path.exists(odr_repo_path):
-        logger.error(f"ODR repository path not found: {odr_repo_path}")
-        return f"Error: ODR repository path not found: {odr_repo_path}"
-    if not os.path.exists(node_script_path):
-        logger.error(f"ODR entry point not found at: {node_script_path}")
-        # Attempt common alternatives
-        alt_paths = ["index.js", "cli.js", "dist/index.js", "dist/cli.js"] # Added common build outputs
-        found_alt = False
-        for alt in alt_paths:
-            alt_full_path = os.path.join(odr_repo_path, alt)
-            if os.path.exists(alt_full_path):
-                logger.warning(f"Default ODR entry point not found, using alternative: {alt}")
-                node_script_path = alt_full_path
-                found_alt = True
-                break
-        if not found_alt:
-            return f"Error: ODR entry point not found at {settings.OPEN_DEEP_RESEARCH_ENTRY_POINT} or common alternatives in {odr_repo_path}."
 
     # Prepare command
     cmd = [
@@ -213,15 +232,34 @@ async def run_opendeepresearch_query(query: str, depth: int = 1) -> Optional[Uni
         "--output", output_path, # ODR needs to write to this path
         "--json", # Ensure JSON output is requested
         "--depth", str(depth),
-        # Potentially pass model if ODR supports it via args
-        # "--model", settings.STANDARD_REPORT_MODEL or "google/gemini-1.5-flash-latest"
+        # --- MODIFICATION: Pass the agency's selected LLM model to ODR ---
+        # This assumes ODR accepts a --model argument. Adjust if ODR uses env vars.
+        "--model", settings.STANDARD_REPORT_MODEL or "google/gemini-1.5-flash-latest"
+        # --- END MODIFICATION ---
     ]
 
-    # Environment setup (e.g., for API keys ODR might use)
+    # Environment setup (Crucial: ODR needs API keys)
+    # Since the user doesn't want to manage separate ODR keys,
+    # we assume ODR can use the main agency's key pool if configured correctly (e.g., reads OPENROUTER_API_KEY).
+    # We will pass the *first available* key from our pool as an environment variable.
+    # This is a simplification; a robust solution might involve ODR calling back to the agency for keys.
     env = os.environ.copy()
-    # Example: If ODR reads OPENROUTER_API_KEY
-    # active_key_info = get_next_api_key() # Needs adaptation if called from here
-    # if active_key_info: env['OPENROUTER_API_KEY'] = active_key_info['key']
+    # --- MODIFICATION: Pass an API key via environment ---
+    # This requires agent_utils to be importable here.
+    try:
+        from Acumenis.app.agents.agent_utils import get_next_api_key
+        key_info = get_next_api_key() # Get a key from the pool
+        if key_info and key_info.get('key'):
+            # Assuming ODR might look for OPENROUTER_API_KEY or a generic LLM_API_KEY
+            env['OPENROUTER_API_KEY'] = key_info['key']
+            env['LLM_API_KEY'] = key_info['key'] # Provide a generic one too
+            logger.info(f"Passing API Key ID {key_info.get('id', 'Fallback')} to ODR environment.")
+        else:
+            logger.warning("No API key available from pool to pass to ODR environment. ODR might fail.")
+    except ImportError:
+        logger.error("Could not import agent_utils to get API key for ODR.")
+    # --- END MODIFICATION ---
+
 
     raw_output = ""
     process = None
@@ -232,7 +270,7 @@ async def run_opendeepresearch_query(query: str, depth: int = 1) -> Optional[Uni
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=odr_repo_path, # Crucial: Run from the tool's directory
-            env=env
+            env=env # Pass the modified environment
         )
 
         stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=OPEN_DEEP_RESEARCH_TIMEOUT)
@@ -250,26 +288,36 @@ async def run_opendeepresearch_query(query: str, depth: int = 1) -> Optional[Uni
                     results = json.load(f)
                 logger.info(f"[ProspectResearcher] Successfully parsed JSON results from {output_path}")
                 # Adapt parsing based on expected ODR JSON structure
+                # Common patterns: a list directly, or a dict with a 'results' or 'companies' key
                 if isinstance(results, list): return results
                 if isinstance(results, dict):
                     if isinstance(results.get('results'), list): return results['results']
                     if isinstance(results.get('companies'), list): return results['companies']
                     # Add other potential top-level keys if ODR structure varies
                 logger.warning(f"ODR JSON output is not a list or expected dict structure: {type(results)}. Content: {str(results)[:200]}...")
+                # Attempt to extract meaningful text if JSON structure is wrong but content exists
+                if isinstance(results, dict) and results:
+                     return json.dumps(results) # Return the dict as a string
                 return raw_output # Return raw output if JSON structure is unexpected
+
             except json.JSONDecodeError as e:
                 file_content = ""
                 try:
                     with open(output_path, 'r', encoding='utf-8') as f_err: file_content = f_err.read(500)
                 except Exception: pass
                 logger.error(f"Error decoding JSON from {output_path}: {e}. Raw content start: {file_content}...")
-                return raw_output # Return raw output if JSON parsing fails
+                # If JSON fails but we have raw output, return that as context
+                raw_content = stdout_decoded + "\n" + stderr_decoded # Combine stdout/stderr for context
+                if raw_content.strip(): return raw_content
+                if file_content.strip(): return file_content # Fallback to file content
+                return f"Error: ODR produced non-JSON output in {output_path}."
             except Exception as e:
                 logger.error(f"Error reading results file {output_path}: {e}", exc_info=True)
                 return raw_output
         else:
             logger.error(f"ODR failed (Code: {process.returncode}) or output file missing/empty ({output_path}). Raw output:\n{raw_output}")
-            return raw_output # Return raw output on failure
+            # Return the raw output (stderr likely contains the error)
+            return raw_output
 
     except asyncio.TimeoutError:
          logger.error(f"ODR timed out after {OPEN_DEEP_RESEARCH_TIMEOUT}s for query: '{query[:50]}...'")
@@ -285,7 +333,7 @@ async def run_opendeepresearch_query(query: str, depth: int = 1) -> Optional[Uni
         return f"Error: Unexpected error running ODR - {e}"
     finally:
         # Ensure output file is removed
-        if os.path.exists(output_path):
+        if 'output_path' in locals() and output_path and os.path.exists(output_path):
             try: os.remove(output_path)
             except OSError as e: logger.warning(f"Error removing ODR output file {output_path}: {e}")
 
@@ -314,39 +362,61 @@ async def run_prospecting_cycle(db: AsyncSession, shutdown_event: asyncio.Event)
                 logger.info(f"Reached max prospects per cycle ({MAX_PROSPECTS_PER_CYCLE}).")
                 break
 
-            odr_results = await run_opendeepresearch_query(query, depth=1) # Initial shallow search
+            # --- MODIFICATION: Run ODR for initial lead generation ---
+            logger.info(f"[ProspectResearcher] Running initial ODR query for leads: '{query[:50]}...'")
+            odr_lead_results = await run_opendeepresearch_query(query, depth=1) # Initial shallow search for leads
+            # --- END MODIFICATION ---
 
-            if isinstance(odr_results, list): # Check if we got structured data
-                logger.info(f"[ProspectResearcher] Processing {len(odr_results)} results from query: '{query[:50]}...'")
-                for result in odr_results:
+            if isinstance(odr_lead_results, list): # Check if we got structured data
+                logger.info(f"[ProspectResearcher] Processing {len(odr_lead_results)} potential leads from query: '{query[:50]}...'")
+                for lead in odr_lead_results:
                     if shutdown_event.is_set(): break
                     if prospects_added_this_cycle >= MAX_PROSPECTS_PER_CYCLE: break
 
                     # --- Adapt parsing based on actual ODR output ---
-                    company_name = result.get("name") or result.get("company_name") or result.get("title")
-                    website = result.get("website") or result.get("url") or result.get("link")
-                    description = result.get("description") or result.get("summary") or result.get("snippet") or result.get("text")
+                    company_name = lead.get("name") or lead.get("company_name") or lead.get("title")
+                    website = lead.get("website") or lead.get("url") or lead.get("link")
+                    description = lead.get("description") or lead.get("summary") or lead.get("snippet") or lead.get("text")
                     # --- End Adapt ---
 
                     if not company_name:
-                        logger.debug("Skipping result with no company name.")
+                        logger.debug("Skipping lead with no company name.")
                         continue
                     company_name = company_name.strip()
                     logger.info(f"[ProspectResearcher] Processing lead: {company_name}")
 
                     odr_context_for_llm = None
-                    if ODR_FOR_PROSPECT_DETAILS and website:
+                    # --- MODIFICATION: Use ODR_FOR_PROSPECT_DETAILS flag ---
+                    if ODR_FOR_PROSPECT_DETAILS:
                         # Run deeper ODR search specifically for this company
                         logger.info(f"Running deeper ODR search (depth {ODR_DETAIL_DEPTH}) for {company_name}...")
-                        detail_query = f"Detailed analysis of {company_name} ({website or ''}) focusing on recent activities, challenges, strategic direction, key personnel, and potential needs related to market intelligence."
+                        # Construct a more focused query for pain points
+                        detail_query = f"Analyze {company_name} ({website or ''}). Focus on recent business challenges, strategic shifts, product launches, funding rounds, executive changes, or stated goals relevant to market intelligence needs."
                         detail_results = await run_opendeepresearch_query(detail_query, depth=ODR_DETAIL_DEPTH)
-                        if isinstance(detail_results, str): # If ODR returned raw text
-                            odr_context_for_llm = detail_results[:2000] # Use truncated raw text
+
+                        if isinstance(detail_results, str): # If ODR returned raw text or error message
+                            # Check if it's an error message or just text
+                            if detail_results.startswith("Error:"):
+                                logger.warning(f"Detailed ODR search failed for {company_name}: {detail_results}")
+                                odr_context_for_llm = description # Fallback to initial description
+                            else:
+                                odr_context_for_llm = detail_results[:2000] # Use truncated raw text
+                                logger.info(f"Using raw text ODR context for {company_name}.")
                         elif isinstance(detail_results, list) and detail_results:
                             # Synthesize list results into context (simple approach)
-                            odr_context_for_llm = "\n".join([f"- {item.get('name', item.get('title', ''))}: {item.get('description', item.get('snippet', ''))[:200]}" for item in detail_results[:5]])
+                            odr_context_for_llm = "\n".join([
+                                f"- {item.get('name', item.get('title', ''))}: {item.get('description', item.get('snippet', ''))[:200]}"
+                                for item in detail_results[:5] # Limit synthesis length
+                            ])
+                            logger.info(f"Synthesized detailed ODR context for {company_name}.")
                         else:
-                            logger.info(f"No detailed ODR context found for {company_name}.")
+                            logger.info(f"No detailed ODR context found for {company_name}. Using description.")
+                            odr_context_for_llm = description # Fallback if no results
+                    else:
+                        # If ODR_FOR_PROSPECT_DETAILS is false, use the initial description
+                        odr_context_for_llm = description
+                    # --- END MODIFICATION ---
+
 
                     # Infer pain points using LLM, potentially with ODR context
                     inferred_pain = await infer_pain_points_llm(client, company_name, description, odr_context_for_llm)
@@ -362,7 +432,8 @@ async def run_prospecting_cycle(db: AsyncSession, shutdown_event: asyncio.Event)
                     prospect_status = "NEW"
                     email_to_save = contact_email
                     if not contact_email:
-                        prospect_status = "NEW" # No email guessed
+                        prospect_status = "NEW" # No email guessed, still potentially valuable lead
+                        logger.info(f"No email guessed for {company_name}, saving as NEW lead.")
                     elif not is_valid_email:
                         prospect_status = "INVALID_EMAIL"
                         email_to_save = None # Don't save invalid email
@@ -370,34 +441,36 @@ async def run_prospecting_cycle(db: AsyncSession, shutdown_event: asyncio.Event)
 
                     # Save prospect using isolated session
                     try:
+                        # Use a context manager for the session
                         async with get_worker_session() as prospect_session:
-                            created = await crud.create_prospect(
+                            created = await crud.create_or_update_prospect( # Use create_or_update
                                 db=prospect_session,
                                 company_name=company_name,
                                 email=email_to_save,
                                 website=website,
                                 pain_point=inferred_pain,
                                 source=f"odr_{query[:30].replace(' ', '_')}",
-                                status=prospect_status
+                                status_if_new=prospect_status # Only set status if creating new
                             )
                             if created:
-                                await prospect_session.commit()
+                                await prospect_session.commit() # Commit within the context
                                 prospects_added_this_cycle += 1
-                                logger.info(f"Prospect '{created.company_name}' (ID: {created.prospect_id}) saved with status {prospect_status}. Total added: {prospects_added_this_cycle}")
+                                logger.info(f"Prospect '{created.company_name}' (ID: {created.prospect_id}) saved/updated. Status: {created.status}. Total added this cycle: {prospects_added_this_cycle}")
                             else:
-                                logger.warning(f"Failed to create or update prospect {company_name} (returned None).")
-                                # No explicit rollback needed, session scope handles it on exit if commit fails
+                                # This case might occur if create_or_update decides not to update
+                                logger.info(f"Prospect {company_name} not created or updated (e.g., no new info).")
+                                # No explicit rollback needed, session handles it
 
                     except Exception as e:
                         logger.error(f"Error saving prospect {company_name} to DB: {e}", exc_info=True)
-                        # No explicit rollback needed
+                        # Rollback will happen automatically if session context manager exits with exception
 
                     await asyncio.sleep(random.uniform(1.5, 3.0)) # Delay between processing leads
 
-            elif isinstance(odr_results, str): # ODR failed or returned raw text
-                logger.error(f"ODR query failed or returned non-JSON for query '{query[:50]}...'. Error/Output: {odr_results[:500]}...")
+            elif isinstance(odr_lead_results, str): # ODR failed or returned raw text/error
+                logger.error(f"ODR lead generation query failed or returned non-JSON for query '{query[:50]}...'. Error/Output: {odr_lead_results[:500]}...")
             else:
-                 logger.info(f"No results returned from ODR query: '{query[:50]}...'")
+                 logger.info(f"No initial leads returned from ODR query: '{query[:50]}...'")
 
             # Delay between different ODR queries
             await asyncio.sleep(random.uniform(5.0, 10.0))
@@ -407,4 +480,4 @@ async def run_prospecting_cycle(db: AsyncSession, shutdown_event: asyncio.Event)
     finally:
         if client: await client.aclose()
 
-    logger.info(f"[ProspectResearcher] Prospecting cycle finished. Added {prospects_added_this_cycle} new prospects.")
+    logger.info(f"[ProspectResearcher] Prospecting cycle finished. Added/Updated {prospects_added_this_cycle} prospects this cycle.")
