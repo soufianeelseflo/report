@@ -6,31 +6,30 @@ import random
 import traceback
 from typing import Optional, Dict, Any, List, Tuple
 from bs4 import BeautifulSoup
-import base64 # For potential future use with captcha solvers
-from urllib.parse import urlparse, urljoin # Added for URL handling
+import base64 # For CAPTCHA image data
+from urllib.parse import urlparse, urljoin
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 # Corrected relative imports
-# Ensure Acumenis is the root package name if running modules directly
-# If running via the main app, relative imports might need adjustment based on execution context
 try:
-    # Attempt package-relative imports first
     from Acumenis.app.core.config import settings
     from Acumenis.app.db.base import get_worker_session
     from Acumenis.app.db import crud
-    from Acumenis.app.agents.agent_utils import get_httpx_client # Reuse client creation logic initially
+    # --- MODIFICATION: Import call_llm_api for CAPTCHA solving ---
+    from Acumenis.app.agents.agent_utils import get_httpx_client, call_llm_api
+    # --- END MODIFICATION ---
 except ImportError:
-    # Fallback for direct execution or different structure
     print("[KeyAcquirer] WARNING: Using fallback imports. Ensure package structure is correct for deployment.")
     from app.core.config import settings
     from app.db.base import get_worker_session
     from app.db import crud
-    from app.agents.agent_utils import get_httpx_client
+    # --- MODIFICATION: Import call_llm_api for CAPTCHA solving ---
+    from app.agents.agent_utils import get_httpx_client, call_llm_api
+    # --- END MODIFICATION ---
 
 
 # --- Constants ---
-# Use settings for URLs and selectors, with defaults
 TEMP_EMAIL_PROVIDER_URL = getattr(settings, 'TEMP_EMAIL_PROVIDER_URL', "https://inboxes.com/")
 OPENROUTER_SIGNUP_URL = getattr(settings, 'OPENROUTER_SIGNUP_URL', "https://openrouter.ai/auth?callbackUrl=%2Fkeys")
 OPENROUTER_KEYS_URL = getattr(settings, 'OPENROUTER_KEYS_URL', "https://openrouter.ai/keys")
@@ -39,9 +38,13 @@ SIGNUP_EMAIL_FIELD_NAME = getattr(settings, 'SIGNUP_EMAIL_FIELD_NAME', "email")
 SIGNUP_PASSWORD_FIELD_NAME = getattr(settings, 'SIGNUP_PASSWORD_FIELD_NAME', "password")
 SIGNUP_SUBMIT_SELECTOR = getattr(settings, 'SIGNUP_SUBMIT_SELECTOR', "button[type='submit']")
 API_KEY_DISPLAY_SELECTOR = getattr(settings, 'API_KEY_DISPLAY_SELECTOR', "input[readonly][value^='sk-or-']")
+# --- MODIFICATION: Add CAPTCHA related selectors/identifiers ---
+CAPTCHA_IMAGE_SELECTOR = getattr(settings, 'CAPTCHA_IMAGE_SELECTOR', 'img[alt="CAPTCHA"], iframe[title*="CAPTCHA"], div.captcha-image img') # Example, needs tuning
+CAPTCHA_INPUT_SELECTOR = getattr(settings, 'CAPTCHA_INPUT_SELECTOR', 'input[name*="captcha"], input[id*="captcha"]') # Example
+# --- END MODIFICATION ---
 
-DEFAULT_TIMEOUT = 60.0 # Increased timeout for potentially slow pages/proxies
-ACQUISITION_RETRY_ATTEMPTS = 1 # Reduce retries per step to fail faster on persistent issues
+DEFAULT_TIMEOUT = 60.0
+ACQUISITION_RETRY_ATTEMPTS = 1
 
 # --- Helper Functions ---
 
@@ -52,7 +55,6 @@ def get_random_proxy() -> Optional[str]:
         proxies = [settings.PROXY_URL]
 
     if not proxies:
-        # print("[KeyAcquirer] No proxies configured.") # Reduce log noise
         return None
 
     valid_proxies = [p for p in proxies if re.match(r"^(http|https|socks\d?)://", p)]
@@ -72,26 +74,38 @@ async def create_proxied_client() -> Optional[httpx.AsyncClient]:
         proxy_display = proxy_url.split('@')[-1] if '@' in proxy_url else proxy_url
         print(f"[KeyAcquirer] Attempting client creation with proxy: {proxy_display}")
     else:
-        # If circumvention is key, failing without a proxy might be desired
         print("[KeyAcquirer] ERROR: No valid proxy available for this attempt. Cannot proceed without proxy.")
-        return None # Fail if no proxy
+        return None
 
     limits = httpx.Limits(max_connections=10, max_keepalive_connections=2)
     timeout = httpx.Timeout(DEFAULT_TIMEOUT, connect=20.0)
-    # Use a more common user agent
+    # --- MODIFICATION: Use more diverse/randomized headers ---
+    # Example list of user agents
+    user_agents = [
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4.1 Safari/605.1.15",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:125.0) Gecko/20100101 Firefox/125.0",
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"
+    ]
+    platforms = ['"Windows"', '"macOS"', '"Linux"']
+    accept_languages = ["en-US,en;q=0.9", "en-GB,en;q=0.8", "en;q=0.7"]
+
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36", # Slightly updated UA
+        "User-Agent": random.choice(user_agents),
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
-        "Accept-Language": "en-US,en;q=0.9",
-        "Sec-Ch-Ua": '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
+        "Accept-Language": random.choice(accept_languages),
+        "Sec-Ch-Ua": '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"', # Keep relatively static or rotate plausible sets
         "Sec-Ch-Ua-Mobile": "?0",
-        "Sec-Ch-Ua-Platform": '"Linux"', # Or Windows/macOS
+        "Sec-Ch-Ua-Platform": random.choice(platforms),
         "Sec-Fetch-Dest": "document",
         "Sec-Fetch-Mode": "navigate",
-        "Sec-Fetch-Site": "none",
+        "Sec-Fetch-Site": "none", # Initial request
         "Sec-Fetch-User": "?1",
         "Upgrade-Insecure-Requests": "1",
+        "DNT": "1", # Do Not Track
+        "Referer": "https://www.google.com/", # Common referer
     }
+    # --- END MODIFICATION ---
 
     try:
         client = httpx.AsyncClient(
@@ -99,29 +113,88 @@ async def create_proxied_client() -> Optional[httpx.AsyncClient]:
             limits=limits,
             timeout=timeout,
             headers=headers,
-            follow_redirects=True, # Keep redirects on for simplicity unless causing issues
+            follow_redirects=True,
             http2=True
         )
-        # print(f"[KeyAcquirer] Client created successfully.")
         return client
     except Exception as e:
         print(f"[KeyAcquirer] Failed to create client with proxy {proxy_display}: {e}")
         return None
 
-# --- Web Interaction Steps (Highly Unreliable - Expect Breakage & Blocks) ---
+# --- MODIFICATION: Function to attempt CAPTCHA solving ---
+async def attempt_multimodal_captcha_solve(client: httpx.AsyncClient, captcha_image_url: str) -> Optional[str]:
+    """
+    Downloads CAPTCHA image, sends to multimodal LLM for solving.
+    Returns the solved text or None. HIGHLY EXPERIMENTAL.
+    """
+    print(f"[KeyAcquirer] Attempting multimodal CAPTCHA solve for image: {captcha_image_url[:50]}...")
+    captcha_prompt = "Solve the CAPTCHA presented in the image. Respond ONLY with the characters shown in the image, in the correct order. If you cannot solve it, respond with 'UNSOLVABLE'."
+    image_data_base64 = None
+
+    try:
+        # --- CHALLENGE: Downloading the image ---
+        # httpx client might not render JS needed to display the CAPTCHA image,
+        # or the image might be in an iframe from a different domain.
+        # This part is the most likely to fail without a full browser automation tool.
+        # Placeholder: Assume we *can* get the image data somehow.
+        # In a real scenario, this might involve:
+        # 1. Parsing the src attribute and making another request.
+        # 2. Using Playwright/Selenium if httpx fails (adds significant complexity).
+        # For now, we log a warning and return None.
+        print(f"[KeyAcquirer] WARNING: Downloading CAPTCHA image at {captcha_image_url} with basic HTTP client is unreliable. Full browser automation might be needed. Skipping solve attempt.")
+        # If download was successful (replace warning above with actual download logic):
+        # async with client.stream("GET", captcha_image_url) as response:
+        #     response.raise_for_status()
+        #     image_bytes = await response.aread()
+        #     image_data_base64 = base64.b64encode(image_bytes).decode('utf-8')
+        # --- END CHALLENGE ---
+
+        if not image_data_base64:
+             print("[KeyAcquirer] Failed to obtain CAPTCHA image data.")
+             return None
+
+        # Call the multimodal LLM (using a capable model like Gemini Pro or GPT-4o)
+        llm_response = await call_llm_api(
+            client,
+            prompt=captcha_prompt,
+            model=settings.PREMIUM_REPORT_MODEL, # Use a strong multimodal model
+            image_data=image_data_base64
+        )
+
+        if llm_response and isinstance(llm_response.get("raw_inference"), str):
+            solution = llm_response["raw_inference"].strip()
+            if solution.upper() != "UNSOLVABLE" and len(solution) > 1: # Basic check
+                print(f"[KeyAcquirer] Multimodal LLM proposed CAPTCHA solution: '{solution}'")
+                return solution
+            else:
+                print(f"[KeyAcquirer] Multimodal LLM could not solve CAPTCHA (response: {solution})")
+                return None
+        else:
+            print("[KeyAcquirer] Failed to get valid response from multimodal LLM for CAPTCHA.")
+            return None
+
+    except Exception as e:
+        print(f"[KeyAcquirer] Error during multimodal CAPTCHA solve attempt: {e}")
+        traceback.print_exc()
+        return None
+# --- END MODIFICATION ---
+
+
+# --- Web Interaction Steps ---
 
 async def get_temporary_email(client: httpx.AsyncClient) -> Tuple[Optional[str], str]:
     """Attempts to get a temporary email. Returns (email, status_message)."""
     step_name = "Get Temporary Email"
     print(f"[KeyAcquirer] [{step_name}] Attempting from {TEMP_EMAIL_PROVIDER_URL}...")
     try:
+        # Add referer for initial visit
+        client.headers['Referer'] = 'https://www.google.com/'
         response = await client.get(TEMP_EMAIL_PROVIDER_URL, timeout=DEFAULT_TIMEOUT)
         response.raise_for_status()
         soup = BeautifulSoup(response.text, 'html.parser')
         email_element = soup.select_one(TEMP_EMAIL_SELECTOR)
 
         if email_element:
-            # Try common attributes/methods to extract email
             temp_email = email_element.get('value') or \
                          email_element.get('data-original-title') or \
                          email_element.get('data-clipboard-text') or \
@@ -131,6 +204,8 @@ async def get_temporary_email(client: httpx.AsyncClient) -> Tuple[Optional[str],
             if temp_email and '@' in temp_email:
                 msg = f"Obtained temporary email: {temp_email}"
                 print(f"[KeyAcquirer] [{step_name}] SUCCESS: {msg}")
+                # Update client referer for next step
+                client.headers['Referer'] = TEMP_EMAIL_PROVIDER_URL
                 return temp_email, f"SUCCESS: {msg}"
             else:
                  msg = f"FAILED: Failed to extract valid email content from element: {str(email_element)[:100]}..."
@@ -156,28 +231,19 @@ async def get_temporary_email(client: httpx.AsyncClient) -> Tuple[Optional[str],
         return None, msg
 
 async def signup_openrouter(client: httpx.AsyncClient, temp_email: str) -> Tuple[bool, str]:
-    """Attempts signup. Returns (success, status_message). Logs CAPTCHA info."""
+    """Attempts signup. Returns (success, status_message). Tries multimodal CAPTCHA solve."""
     step_name = "Signup OpenRouter"
     print(f"[KeyAcquirer] [{step_name}] Attempting for {temp_email}...")
-    generated_password = f"Acum3n!s_{random.randint(1000000, 9999999)}" # More complex password
+    generated_password = f"Acum3n!s_{random.randint(1000000, 9999999)}"
 
     try:
         # GET signup page first
+        # Update referer
+        client.headers['Referer'] = TEMP_EMAIL_PROVIDER_URL # Referer from temp mail site
         get_response = await client.get(OPENROUTER_SIGNUP_URL, timeout=DEFAULT_TIMEOUT)
         get_response.raise_for_status()
         soup_get = BeautifulSoup(get_response.text, 'html.parser')
-
-        # *** CAPTCHA Detection ***
-        is_captcha_present = soup_get.find('div', {'class': re.compile(r'captcha|challenge', re.I)}) or \
-                             soup_get.find('iframe', {'title': re.compile(r'captcha|challenge', re.I)}) or \
-                             'captcha' in get_response.text.lower() or \
-                             'turnstile' in get_response.text.lower() or \
-                             'challenge' in get_response.text.lower() # Broader check
-
-        if is_captcha_present:
-            captcha_info = f"FAILED: CAPTCHA Detected during signup attempt. Cannot proceed automatically. URL: {OPENROUTER_SIGNUP_URL}"
-            print(f"[KeyAcquirer] [{step_name}] {captcha_info}")
-            return False, captcha_info # Fail immediately
+        current_url = str(get_response.url) # Get final URL after redirects
 
         # Prepare POST data (Extract CSRF if needed)
         csrf_token = None
@@ -190,10 +256,41 @@ async def signup_openrouter(client: httpx.AsyncClient, temp_email: str) -> Tuple
             SIGNUP_PASSWORD_FIELD_NAME: generated_password,
         }
         if csrf_token:
-            payload[csrf_input['name']] = csrf_token # Add CSRF if found
+            payload[csrf_input['name']] = csrf_token
 
-        print(f"[KeyAcquirer] [{step_name}] Preparing signup POST...")
-        response_post = await client.post(OPENROUTER_SIGNUP_URL, data=payload, timeout=DEFAULT_TIMEOUT)
+        # --- MODIFICATION: CAPTCHA Handling ---
+        captcha_image_element = soup_get.select_one(CAPTCHA_IMAGE_SELECTOR)
+        captcha_input_element = soup_get.select_one(CAPTCHA_INPUT_SELECTOR)
+
+        if captcha_image_element and captcha_input_element:
+            print(f"[KeyAcquirer] [{step_name}] CAPTCHA detected on signup page.")
+            captcha_image_url_relative = captcha_image_element.get('src')
+            if captcha_image_url_relative:
+                # Try to resolve the absolute URL
+                try:
+                    captcha_image_url_absolute = urljoin(current_url, captcha_image_url_relative)
+                    captcha_solution = await attempt_multimodal_captcha_solve(client, captcha_image_url_absolute)
+                    if captcha_solution:
+                        captcha_input_name = captcha_input_element.get('name')
+                        if captcha_input_name:
+                            payload[captcha_input_name] = captcha_solution
+                            print(f"[KeyAcquirer] [{step_name}] Added LLM CAPTCHA solution to payload.")
+                        else:
+                            print(f"[KeyAcquirer] [{step_name}] Could not find name for CAPTCHA input field.")
+                            # Proceed without CAPTCHA solution, likely to fail
+                    else:
+                        print(f"[KeyAcquirer] [{step_name}] Multimodal CAPTCHA solve failed. Proceeding without solution.")
+                        # Optionally: return False, "FAILED: CAPTCHA detected and could not be solved."
+                except Exception as url_err:
+                    print(f"[KeyAcquirer] [{step_name}] Error resolving CAPTCHA image URL: {url_err}")
+            else:
+                print(f"[KeyAcquirer] [{step_name}] Could not extract CAPTCHA image source URL.")
+        # --- END MODIFICATION ---
+
+        print(f"[KeyAcquirer] [{step_name}] Preparing signup POST to {current_url}...")
+        # Update referer for POST
+        client.headers['Referer'] = current_url
+        response_post = await client.post(current_url, data=payload, timeout=DEFAULT_TIMEOUT) # Post to the URL we landed on
         status_code = response_post.status_code
         response_text_lower = response_post.text.lower()
 
@@ -205,6 +302,8 @@ async def signup_openrouter(client: httpx.AsyncClient, temp_email: str) -> Tuple
                 response_post.is_redirect:
                  msg = f"SUCCESS: Signup POST successful (Status: {status_code}, Pending Verification) for {temp_email}."
                  print(f"[KeyAcquirer] [{step_name}] {msg}")
+                 # Update client referer
+                 client.headers['Referer'] = str(response_post.url) # Referer is now the signup/redirect page
                  return True, msg
              else:
                   msg = f"FAILED: Signup POST status {status_code}, but success message unclear. Response: {response_post.text[:200]}..."
@@ -219,7 +318,11 @@ async def signup_openrouter(client: httpx.AsyncClient, temp_email: str) -> Tuple
              print(f"[KeyAcquirer] [{step_name}] {msg}")
              return False, msg
         else:
-             msg = f"FAILED: Signup POST failed for {temp_email}. Status: {status_code}. Response: {response_post.text[:200]}..."
+             # Check for CAPTCHA failure messages
+             if "invalid captcha" in response_text_lower or "captcha verification failed" in response_text_lower:
+                 msg = f"FAILED: Signup POST failed for {temp_email}. CAPTCHA verification failed. Response: {response_post.text[:200]}..."
+             else:
+                 msg = f"FAILED: Signup POST failed for {temp_email}. Status: {status_code}. Response: {response_post.text[:200]}..."
              print(f"[KeyAcquirer] [{step_name}] {msg}")
              return False, msg
 
@@ -249,14 +352,14 @@ async def check_and_verify_email(client: httpx.AsyncClient, temp_email: str) -> 
         if attempt > 0: await asyncio.sleep(check_interval)
         print(f"[KeyAcquirer] [{step_name}] Inbox check attempt {attempt + 1}/{max_check_attempts}...")
         try:
-            # Fetch inbox page
+            # Fetch inbox page - Referer should be the temp mail site
+            client.headers['Referer'] = TEMP_EMAIL_PROVIDER_URL
             inbox_response = await client.get(TEMP_EMAIL_PROVIDER_URL, timeout=DEFAULT_TIMEOUT)
             inbox_response.raise_for_status()
             inbox_soup = BeautifulSoup(inbox_response.text, 'html.parser')
 
             # Find link - adjust selector based on temp mail provider structure
             link_element = inbox_soup.find('a', href=re.compile(r'openrouter\.ai/(auth/verify|verify|confirm)'))
-            # Example refinement: link_element = inbox_soup.select_one('div.email-preview a[href*="openrouter.ai/verify"]')
 
             if link_element and link_element.get('href'):
                 found_link = link_element['href']
@@ -278,30 +381,33 @@ async def check_and_verify_email(client: httpx.AsyncClient, temp_email: str) -> 
 
         except httpx.HTTPStatusError as e:
             print(f"[KeyAcquirer] [{step_name}] HTTP error {e.response.status_code} checking inbox.")
-            # Don't immediately fail, maybe transient issue or provider change
         except httpx.RequestError as e:
             print(f"[KeyAcquirer] [{step_name}] Network error checking inbox: {e}")
-            # Don't immediately fail
         except Exception as e:
             print(f"[KeyAcquirer] [{step_name}] Error parsing inbox: {e}")
-            traceback.print_exc() # Log full trace for parsing errors
+            traceback.print_exc()
 
     if verification_link:
         print(f"[KeyAcquirer] [{step_name}] Attempting to visit verification link: {verification_link}")
         try:
+            # Set referer to the temp mail site before clicking link
+            client.headers['Referer'] = TEMP_EMAIL_PROVIDER_URL
             verify_response = await client.get(verification_link, timeout=DEFAULT_TIMEOUT, follow_redirects=True)
             verify_response.raise_for_status()
             response_text_lower = verify_response.text.lower()
+            final_url = str(verify_response.url)
 
             if ("email verified" in response_text_lower or \
                 "verification successful" in response_text_lower or \
                 "account confirmed" in response_text_lower or \
-                (verify_response.status_code == 200 and "/keys" in str(verify_response.url))):
+                (verify_response.status_code == 200 and "/keys" in final_url)): # Check if redirected to keys page
                 msg = f"SUCCESS: Email verification successful for {temp_email}."
                 print(f"[KeyAcquirer] [{step_name}] {msg}")
+                # Update referer to the page we landed on after verification
+                client.headers['Referer'] = final_url
                 return True, msg
             else:
-                msg = f"FAILED: Verification link visited, but success unclear. Status: {verify_response.status_code}, URL: {verify_response.url}, Response: {verify_response.text[:100]}..."
+                msg = f"FAILED: Verification link visited, but success unclear. Status: {verify_response.status_code}, URL: {final_url}, Response: {verify_response.text[:100]}..."
                 print(f"[KeyAcquirer] [{step_name}] {msg}")
                 return False, msg
         except httpx.HTTPStatusError as e:
@@ -327,14 +433,13 @@ async def extract_api_key(client: httpx.AsyncClient) -> Tuple[Optional[str], str
     step_name = "Extract API Key"
     print(f"[KeyAcquirer] [{step_name}] Attempting from {OPENROUTER_KEYS_URL}...")
     try:
+        # Referer should be the page we landed on after verification/login
+        # client.headers['Referer'] = ??? # Already set by verify_email on success
         keys_page_response = await client.get(OPENROUTER_KEYS_URL, timeout=DEFAULT_TIMEOUT)
         keys_page_response.raise_for_status()
         keys_soup = BeautifulSoup(keys_page_response.text, 'html.parser')
 
-        # Attempt to find the key directly using the more specific selector
         key_element = keys_soup.select_one(API_KEY_DISPLAY_SELECTOR)
-
-        # Fallback selectors
         if not key_element: key_element = keys_soup.find('input', {'value': re.compile(r'^sk-or-')})
         if not key_element:
              code_elements = keys_soup.find_all('code')
@@ -354,14 +459,12 @@ async def extract_api_key(client: httpx.AsyncClient) -> Tuple[Optional[str], str
                 print(f"[KeyAcquirer] [{step_name}] {msg}")
                 return None, msg
         else:
-            # Check for common failure reasons
             if "you haven't created any keys yet" in keys_page_response.text.lower():
                  msg = f"FAILED: API key not found. Page indicates no keys generated yet. Manual generation likely required at {OPENROUTER_KEYS_URL}"
             elif "login" in str(keys_page_response.url).lower() or keys_page_response.status_code != 200:
                  msg = f"FAILED: Failed to access keys page (Status: {keys_page_response.status_code}). Likely not logged in or session expired. URL: {keys_page_response.url}"
             else:
                  msg = f"FAILED: Could not find API key element. Page structure changed? Operator check needed at {OPENROUTER_KEYS_URL}"
-                 # print(f"Keys page content sample: {keys_page_response.text[:500]}") # Debugging
             print(f"[KeyAcquirer] [{step_name}] {msg}")
             return None, msg
 
@@ -406,7 +509,7 @@ async def acquire_one_key(session: AsyncSession) -> Tuple[Optional[str], List[st
         status_log.append(f"TempEmail: {msg}")
         if not temp_email_used: raise Exception("Temp Email Failed")
 
-        # 2. Sign Up
+        # 2. Sign Up (with CAPTCHA attempt)
         signup_success, msg = await signup_openrouter(client, temp_email_used)
         status_log.append(f"Signup: {msg}")
         if not signup_success: raise Exception("Signup Failed")
@@ -436,24 +539,21 @@ async def acquire_one_key(session: AsyncSession) -> Tuple[Optional[str], List[st
             await session.commit() # Commit the successful key addition
             print(f"[KeyAcquirer] Key ID {db_key.id} committed to DB.")
         else:
-            # This case means add_api_key failed (e.g., duplicate or encryption error)
             status_log.append("FAILED: DB Add operation failed (duplicate/error).")
             await session.rollback()
-            api_key = None # Mark as failure for the overall attempt
+            api_key = None
             print(f"[KeyAcquirer] Failed to add key to DB (duplicate or error).")
 
-
-        return api_key, status_log # Return key and log
+        return api_key, status_log
 
     except Exception as e:
-        # Capture the specific failure reason from the exception message if possible
         failure_reason = str(e)
-        if not failure_reason.startswith("FAILED:"): # Add prefix if not already there
+        if not failure_reason.startswith("FAILED:"):
             failure_reason = f"FAILED: {failure_reason}"
         status_log.append(failure_reason)
         print(f"[KeyAcquirer] Attempt FAILED: {failure_reason}")
-        await session.rollback() # Rollback any potential partial changes
-        return None, status_log # Indicate failure, return log
+        await session.rollback()
+        return None, status_log
     finally:
         if client:
             await client.aclose()
@@ -461,11 +561,6 @@ async def acquire_one_key(session: AsyncSession) -> Tuple[Optional[str], List[st
         result_status = "Success" if api_key else "Failed"
         print(f"--- Finished Key Acquisition Attempt ({result_status}, Duration: {elapsed:.2f}s) ---")
         print(f"--- Status Log: {' -> '.join(status_log)}")
-        # Session is closed by the calling worker loop's callback
-
-# Note: run_acquisition_process remains the same as the 'new' version provided previously,
-# as its logic for handling consecutive failures and task management is sound.
-# It will now correctly receive the detailed status_log from the revised acquire_one_key.
 
 async def run_acquisition_process(target_keys: int, shutdown_event: asyncio.Event):
     """Runs the key acquisition process until target is reached or stops."""
@@ -474,9 +569,8 @@ async def run_acquisition_process(target_keys: int, shutdown_event: asyncio.Even
     attempt_count = 0
     session: AsyncSession = None
     consecutive_failures = 0
-    max_consecutive_failures = settings.KEY_ACQUIRER_MAX_FAILURES or 5 # Use setting or default
+    max_consecutive_failures = settings.KEY_ACQUIRER_MAX_FAILURES or 5
 
-    # Initial count of existing keys
     try:
         session = await get_worker_session()
         initial_keys = await crud.get_active_api_keys(session, provider="openrouter")
@@ -484,51 +578,38 @@ async def run_acquisition_process(target_keys: int, shutdown_event: asyncio.Even
         print(f"[KeyAcquirer] Initial active OpenRouter keys in DB: {acquired_count}")
     except Exception as e:
         print(f"[KeyAcquirer] Error checking initial keys: {e}")
-        acquired_count = 0 # Assume zero if check fails
+        acquired_count = 0
     finally:
         if session: await session.close()
 
-    max_concurrent_attempts = settings.KEY_ACQUIRER_CONCURRENCY or 3 # Reduce default concurrency slightly
+    max_concurrent_attempts = settings.KEY_ACQUIRER_CONCURRENCY or 3
     active_tasks = set()
 
     while acquired_count < target_keys and not shutdown_event.is_set() and consecutive_failures < max_consecutive_failures:
-        # Launch new tasks up to the concurrency limit
         while len(active_tasks) < max_concurrent_attempts and acquired_count + len(active_tasks) < target_keys:
             attempt_count += 1
             print(f"[KeyAcquirer] Starting attempt #{attempt_count} ({len(active_tasks)+1}/{max_concurrent_attempts}). Current count: {acquired_count}/{target_keys}")
-            session = await get_worker_session() # Get session for this attempt
-            # Pass session to acquire_one_key
+            session = await get_worker_session()
             task = asyncio.create_task(acquire_one_key(session))
             active_tasks.add(task)
-            # Ensure session is closed after task finishes, regardless of outcome
-            # Pass the session explicitly to the lambda
             task.add_done_callback(lambda t, s=session: asyncio.create_task(s.close()) if s else None)
 
-
-        # Wait for at least one task to complete
-        if not active_tasks: break # Should not happen if loop condition is correct
+        if not active_tasks: break
         done, active_tasks = await asyncio.wait(active_tasks, return_when=asyncio.FIRST_COMPLETED)
 
-        # Process completed tasks
         for task in done:
             try:
-                result_key, status_log = await task # Await task result to catch exceptions and get log
+                result_key, status_log = await task
                 if result_key:
                     acquired_count += 1
-                    consecutive_failures = 0 # Reset failure count on success
+                    consecutive_failures = 0
                     print(f"[KeyAcquirer] Progress: {acquired_count}/{target_keys} keys acquired.")
-                    # Commit is now handled within acquire_one_key on success
                 else:
-                    # Task failed
                     consecutive_failures += 1
                     failure_summary = status_log[-1] if status_log else "Unknown failure"
                     print(f"[KeyAcquirer] Acquisition attempt failed. Reason: {failure_summary}")
-                    # Check for specific blocking failures
-                    if "CAPTCHA Detected" in failure_summary:
-                         print("[KeyAcquirer] CAPTCHA detected, stopping further attempts as it's likely systemic.")
-                         consecutive_failures = max_consecutive_failures # Force stop
-                    elif "Forbidden (403)" in failure_summary:
-                         print("[KeyAcquirer] Forbidden (403) error detected, likely IP block. Stopping further attempts.")
+                    if "CAPTCHA detected" in failure_summary or "Forbidden (403)" in failure_summary:
+                         print(f"[KeyAcquirer] Critical block detected ({failure_summary}). Stopping further attempts.")
                          consecutive_failures = max_consecutive_failures # Force stop
 
                     if consecutive_failures >= max_consecutive_failures:
@@ -541,7 +622,6 @@ async def run_acquisition_process(target_keys: int, shutdown_event: asyncio.Even
                  if consecutive_failures >= max_consecutive_failures:
                       print(f"[KeyAcquirer] Reached max consecutive failures ({max_consecutive_failures}) after task exception. Stopping.")
 
-        # Check exit conditions
         if acquired_count >= target_keys:
             print(f"[KeyAcquirer] Target of {target_keys} keys reached.")
             break
@@ -550,13 +630,9 @@ async def run_acquisition_process(target_keys: int, shutdown_event: asyncio.Even
              break
         if consecutive_failures >= max_consecutive_failures:
              print("[KeyAcquirer] Stopping due to excessive consecutive failures or critical block.")
-             # Log this event for MCOL/operator
              log_session = None
              try:
                  log_session = await get_worker_session()
-                 # Use a generic logging function if available, otherwise print clearly
-                 # await crud.log_system_event(log_session, agent="KeyAcquirer", event_type="Error", details=f"Stopped due to max consecutive failures ({consecutive_failures}) or critical block.")
-                 # await log_session.commit()
                  print(f"[KeyAcquirer][ALERT] Process stopped. Max failures ({max_consecutive_failures}) reached or critical block encountered.")
              except Exception as log_e:
                  print(f"[KeyAcquirer] Failed to log stopping event: {log_e}")
@@ -565,17 +641,15 @@ async def run_acquisition_process(target_keys: int, shutdown_event: asyncio.Even
                  if log_session: await log_session.close()
              break
 
-        await asyncio.sleep(1.0) # Short delay between checks
+        await asyncio.sleep(1.0)
 
-    # --- Cleanup ---
     if active_tasks:
         print(f"[KeyAcquirer] Waiting for {len(active_tasks)} remaining acquisition attempts to finish...")
         if shutdown_event.is_set() or consecutive_failures >= max_consecutive_failures:
              print("[KeyAcquirer] Cancelling remaining tasks...")
              for task in active_tasks: task.cancel()
-
         results = await asyncio.gather(*active_tasks, return_exceptions=True)
-        # Process remaining results for logging purposes
+        # Process remaining results for logging
         for result in results:
              if isinstance(result, tuple) and result[0] and isinstance(result[0], str) and result[0].startswith("sk-or-"):
                  print(f"[KeyAcquirer] A remaining task succeeded. Log: {' -> '.join(result[1])}")
@@ -585,10 +659,7 @@ async def run_acquisition_process(target_keys: int, shutdown_event: asyncio.Even
                   print("[KeyAcquirer] A remaining task was cancelled.")
              elif isinstance(result, Exception):
                   print(f"[KeyAcquirer] A remaining task failed with exception: {result}")
-                  # traceback.print_exc() # Optional: full trace for remaining task exceptions
-             # Else: Task returned None (failure already logged)
 
-    # Final count check
     final_session = None
     try:
         final_session = await get_worker_session()
