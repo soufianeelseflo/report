@@ -25,6 +25,7 @@ pycryptodome==3.20.0 # For potential encryption of sensitive data like SMTP pass
 
 # Payment Integration
 lemonsqueezy.py==1.1.0 # Add Lemon Squeezy library
+openrouter-api
 
 # Git interaction (if needed for repo updates)
 # GitPython==3.1.43
