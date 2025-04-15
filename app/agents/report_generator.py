@@ -1,10 +1,10 @@
 # autonomous_agency/app/agents/report_generator.py
 import asyncio
-import subprocess
 import os
 import json
 import mimetypes
-import re # Import regex
+import traceback
+import logging
 from datetime import datetime
 from email.message import EmailMessage
 from email.utils import formatdate, make_msgid
@@ -12,19 +12,37 @@ from typing import List, Optional, Dict, Any
 
 import aiosmtplib
 from sqlalchemy.ext.asyncio import AsyncSession
-import httpx # Needed for LLM call for cleaning
+import httpx # Needed for internal API call
 
-# Assuming agent_utils defines get_httpx_client and call_llm_api
-from Acumenis.app.agents.agent_utils import get_httpx_client, call_llm_api # Adjusted path
-from Acumenis.app.core.config import settings # Adjusted path
-from Acumenis.app.db import crud, models # Adjusted path
-from Acumenis.app.core.security import decrypt_data # Adjusted path
+# Corrected relative imports for package structure
+try:
+    from Acumenis.app.core.config import settings
+    from Acumenis.app.db import crud, models
+    from Acumenis.app.db.base import get_worker_session # Import get_worker_session
+    from Acumenis.app.core.security import decrypt_data
+    # Import agent_utils for get_httpx_client and call_llm_api (for cleaning)
+    from Acumenis.app.agents.agent_utils import get_httpx_client, call_llm_api
+except ImportError:
+    print("[ReportGenerator] WARNING: Using fallback imports. Ensure package structure is correct for deployment.")
+    from app.core.config import settings
+    from app.db import crud, models
+    from app.db.base import get_worker_session
+    from app.core.security import decrypt_data
+    from app.agents.agent_utils import get_httpx_client, call_llm_api
+
+
+# Setup logger
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
 # Define where reports will be stored (relative to the app root inside the container)
 REPORTS_OUTPUT_DIR = "/app/generated_reports"
 os.makedirs(REPORTS_OUTPUT_DIR, exist_ok=True)
 
-# --- Report Cleaning Function ---
+# Timeout for internal ODR service call
+ODR_SERVICE_TIMEOUT = settings.REPORT_GENERATOR_TIMEOUT_SECONDS or 600
+
+# --- Report Cleaning Function (Unchanged) ---
 async def clean_report_content(client: httpx.AsyncClient, raw_content: str, filename: str) -> str:
     """Uses LLM to clean the raw report content."""
     cleaning_prompt = f"""
@@ -48,58 +66,68 @@ async def clean_report_content(client: httpx.AsyncClient, raw_content: str, file
 
     Cleaned Content:
     """
-    print(f"[ReportCleaner] Cleaning report content for {filename} using LLM...")
+    logger.info(f"[ReportCleaner] Cleaning report content for {filename} using LLM...")
     llm_response = await call_llm_api(client, cleaning_prompt, model="google/gemini-1.5-flash-latest") # Use a fast model for cleaning
 
     if llm_response and isinstance(llm_response.get("raw_inference"), str):
         cleaned = llm_response["raw_inference"].strip()
         # Basic check: ensure it's not empty and seems like report content
         if len(cleaned) > 50:
-            print(f"[ReportCleaner] Cleaning successful for {filename}.")
+            logger.info(f"[ReportCleaner] Cleaning successful for {filename}.")
             return cleaned
         else:
-            print(f"[ReportCleaner] LLM cleaning resulted in very short content for {filename}. Using raw content.")
+            logger.warning(f"[ReportCleaner] LLM cleaning resulted in very short content for {filename}. Using raw content.")
             return raw_content
     else:
-        print(f"[ReportCleaner] LLM cleaning failed for {filename}. Using raw content.")
+        logger.warning(f"[ReportCleaner] LLM cleaning failed for {filename}. Using raw content.")
         return raw_content
 
-
-# --- Email Delivery Function ---
+# --- Email Delivery Function (Unchanged) ---
 async def _send_delivery_email(request_id: int, report_path: str, cleaned_content: Optional[str] = None):
     """
     Handles sending the delivery email with attachment or cleaned content.
     Gets its own DB session. Updates ReportRequest status directly.
     """
-    print(f"[ReportDelivery] Task started for request ID: {request_id}")
+    logger.info(f"[ReportDelivery] Task started for request ID: {request_id}")
     session: AsyncSession = None
     request: Optional[models.ReportRequest] = None
     delivery_account: Optional[models.EmailAccount] = None
     success = False
 
     try:
-        session = await crud.get_worker_session() # Get a new session for this task
+        session = await get_worker_session() # Get a new session for this task
         request = await session.get(models.ReportRequest, request_id)
         if not request:
-            print(f"[ReportDelivery] Error: ReportRequest ID {request_id} not found in DB.")
+            logger.error(f"[ReportDelivery] Error: ReportRequest ID {request_id} not found in DB.")
             return # Cannot proceed
 
-        print(f"[ReportDelivery] Attempting delivery for request ID: {request.request_id} to {request.client_email}")
+        logger.info(f"[ReportDelivery] Attempting delivery for request ID: {request.request_id} to {request.client_email}")
+        # Use specific function to get account for delivery
         delivery_account = await crud.get_active_email_account_for_sending(session)
 
         if not delivery_account:
-            print(f"[ReportDelivery] No active sending account found for request {request.request_id}.")
+            logger.error(f"[ReportDelivery] No active sending account found for request {request.request_id}.")
             request.status = "DELIVERY_FAILED"
             request.error_message = "No active email account available for delivery."
             await session.commit()
             return # Stop processing this email
 
+        # Ensure alias_email is used for sending 'From' address
+        if not delivery_account.alias_email:
+            logger.error(f"[ReportDelivery] CRITICAL: Delivery account {delivery_account.email_address} has no alias_email configured. Cannot send.")
+            request.status = "DELIVERY_FAILED"
+            request.error_message = f"Internal Error: Sender account {delivery_account.email_address} missing alias."
+            # Optionally deactivate account here? Risky.
+            # await crud.set_email_account_inactive(session, delivery_account.account_id, reason="Missing alias_email")
+            await session.commit()
+            return
+
         decrypted_password = decrypt_data(delivery_account.smtp_password_encrypted)
         if not decrypted_password:
-            print(f"[ReportDelivery] CRITICAL: Failed to decrypt password for account {delivery_account.email_address}. Cannot send report {request.request_id}.")
+            logger.error(f"[ReportDelivery] CRITICAL: Failed to decrypt password for account {delivery_account.email_address}. Cannot send report {request.request_id}.")
             request.status = "DELIVERY_FAILED"
             request.error_message = "Internal Error: Failed to decrypt sender email password."
-            # Optionally deactivate account here? Risky if decryption is transient issue.
+            await crud.set_email_account_inactive(session, delivery_account.account_id, reason="Password decryption failed")
             await session.commit()
             return # Stop processing this email
 
@@ -113,16 +141,16 @@ async def _send_delivery_email(request_id: int, report_path: str, cleaned_conten
 
         msg = EmailMessage()
         msg['Subject'] = subject
-        msg['From'] = delivery_account.email_address
+        msg['From'] = delivery_account.alias_email # Use alias for From header
         msg['To'] = request.client_email
         msg['Date'] = formatdate(localtime=True)
-        msg['Message-ID'] = make_msgid(domain=delivery_account.email_address.split('@')[-1])
+        msg['Message-ID'] = make_msgid(domain=delivery_account.alias_email.split('@')[-1])
 
         # Attachment Logic (Prioritize cleaned content)
         if cleaned_content:
             body_main = "Please find the cleaned report attached as a Markdown file."
             msg.add_attachment(cleaned_content.encode('utf-8'), maintype='text', subtype='markdown', filename=report_filename_md)
-            print(f"[ReportDelivery] Attaching cleaned markdown report: {report_filename_md}")
+            logger.info(f"[ReportDelivery] Attaching cleaned markdown report: {report_filename_md}")
         elif os.path.exists(report_path):
             body_main = "Please find the generated report attached."
             ctype, encoding = mimetypes.guess_type(report_path)
@@ -131,12 +159,12 @@ async def _send_delivery_email(request_id: int, report_path: str, cleaned_conten
             try:
                 with open(report_path, 'rb') as fp:
                     msg.add_attachment(fp.read(), maintype=maintype, subtype=subtype, filename=os.path.basename(report_path))
-                print(f"[ReportDelivery] Attached raw report file: {os.path.basename(report_path)}")
+                logger.info(f"[ReportDelivery] Attached raw report file: {os.path.basename(report_path)}")
             except Exception as attach_e:
-                print(f"[ReportDelivery] Failed to attach raw report file {report_path}: {attach_e}")
+                logger.error(f"[ReportDelivery] Failed to attach raw report file {report_path}: {attach_e}")
                 body_main = f"[Attachment Error: Could not attach report file '{os.path.basename(report_path)}'. Please contact support.]"
         else:
-            print(f"[ReportDelivery] Report file not found at path: {report_path}. Sending email without attachment.")
+            logger.error(f"[ReportDelivery] Report file not found at path: {report_path}. Sending email without attachment.")
             body_main = f"[Delivery Error: Report file '{os.path.basename(report_path)}' not found. Please contact support.]"
 
         msg.set_content(body_intro + body_main + body_outro)
@@ -145,26 +173,33 @@ async def _send_delivery_email(request_id: int, report_path: str, cleaned_conten
         try:
             async with aiosmtplib.SMTP(hostname=delivery_account.smtp_host, port=delivery_account.smtp_port, use_tls=True, timeout=45) as smtp:
                 await smtp.login(delivery_account.smtp_user, decrypted_password)
-                await smtp.send_message(msg)
-            print(f"[ReportDelivery] Delivery email sent successfully for request ID: {request.request_id}")
+                # Use alias_email as the sender address in the SMTP transaction
+                await smtp.send_message(msg, sender=delivery_account.alias_email)
+            logger.info(f"[ReportDelivery] Delivery email sent successfully for request ID: {request.request_id} from {delivery_account.alias_email}")
             await crud.increment_email_sent_count(session, delivery_account.account_id)
             request.status = "COMPLETED" # Final success status
             request.error_message = None # Clear any previous error
             success = True
 
         except aiosmtplib.SMTPAuthenticationError as auth_err:
-            print(f"[ReportDelivery] SMTP Auth Error for {delivery_account.email_address}: {auth_err}. Deactivating account.")
+            logger.error(f"[ReportDelivery] SMTP Auth Error for {delivery_account.email_address} (User: {delivery_account.smtp_user}). Deactivating account. Error: {auth_err}")
             await crud.set_email_account_inactive(session, delivery_account.account_id, reason=f"Auth Error: {auth_err}")
             request.status = "DELIVERY_FAILED"
             request.error_message = f"Sender Auth Error: Account {delivery_account.email_address} deactivated."
 
         except aiosmtplib.SMTPRecipientsRefused as recip_err:
-            print(f"[ReportDelivery] SMTP Recipient Refused for {request.client_email}: {recip_err}. Marking as DELIVERY_FAILED.")
+            logger.warning(f"[ReportDelivery] SMTP Recipient Refused for {request.client_email}: {recip_err}. Marking as DELIVERY_FAILED.")
             request.status = "DELIVERY_FAILED"
             request.error_message = f"Recipient Refused: {recip_err}"
 
+        except aiosmtplib.SMTPSenderRefused as sender_err:
+             logger.error(f"[ReportDelivery] SMTP Sender Refused for {delivery_account.alias_email} (Account: {delivery_account.email_address}). Deactivating account. Error: {sender_err}")
+             await crud.set_email_account_inactive(session, delivery_account.account_id, reason=f"Sender Refused: {sender_err}")
+             request.status = "DELIVERY_FAILED"
+             request.error_message = f"Sender Error: Account {delivery_account.email_address} refused sending."
+
         except Exception as smtp_e:
-            print(f"[ReportDelivery] SMTP Error sending report for request ID {request.request_id} via {delivery_account.email_address}: {smtp_e}")
+            logger.error(f"[ReportDelivery] SMTP Error sending report for request ID {request.request_id} via {delivery_account.alias_email}: {smtp_e}", exc_info=True)
             request.status = "DELIVERY_FAILED"
             request.error_message = f"SMTP Error: {str(smtp_e)[:200]}" # Store truncated error
 
@@ -172,9 +207,7 @@ async def _send_delivery_email(request_id: int, report_path: str, cleaned_conten
         await session.commit()
 
     except Exception as e:
-        print(f"[ReportDelivery] Unexpected error in delivery task for request {request_id}: {e}")
-        import traceback
-        traceback.print_exc()
+        logger.error(f"[ReportDelivery] Unexpected error in delivery task for request {request_id}: {e}", exc_info=True)
         # Attempt to update status if possible
         if session and request and request.status != "COMPLETED":
             try:
@@ -182,179 +215,288 @@ async def _send_delivery_email(request_id: int, report_path: str, cleaned_conten
                 request.error_message = f"Internal Delivery Error: {str(e)[:200]}"
                 await session.commit()
             except Exception as final_e:
-                print(f"[ReportDelivery] Failed to update status after unexpected error: {final_e}")
+                logger.error(f"[ReportDelivery] Failed to update status after unexpected error: {final_e}")
                 await session.rollback() # Rollback if final update fails
     finally:
         if session:
             await session.close()
-        print(f"[ReportDelivery] Task finished for request ID: {request_id}. Success: {success}")
+        logger.info(f"[ReportDelivery] Task finished for request ID: {request_id}. Success: {success}")
 
 
-# --- Main Report Processing Function ---
+# --- Main Report Processing Function (MODIFIED) ---
 async def process_single_report_request(db: AsyncSession, request: models.ReportRequest):
     """
-    Processes a single report request using the open-deep-research tool,
+    Processes a single report request by calling the internal open-deep-research service,
     updates status, cleans the report, and attempts email delivery on completion.
     """
-    print(f"[ReportGenerator] Processing request ID: {request.request_id} for '{request.request_details[:50]}...'")
-    client: Optional[httpx.AsyncClient] = None # Define client for LLM call for cleaning
+    logger.info(f"[ReportGenerator] Processing request ID: {request.request_id} for '{request.request_details[:50]}...'")
+    client: Optional[httpx.AsyncClient] = None
     process_success = False
     final_status = "FAILED"
     error_message = "Processing did not complete."
     output_path = None
+    raw_report_content = None # Store raw content from ODR service
     cleaned_report_content = None
 
-    # Define timeout for the external process
-    # Use a dedicated setting if available, otherwise calculate based on interval
-    report_timeout = settings.REPORT_GENERATOR_TIMEOUT_SECONDS or (settings.REPORT_GENERATOR_INTERVAL_SECONDS * 10)
+    # --- MODIFICATION START: Use internal ODR service ---
+    odr_service_url = getattr(settings, 'OPEN_DEEP_RESEARCH_SERVICE_URL', None)
+    if not odr_service_url:
+        error_message = "Configuration Error: OPEN_DEEP_RESEARCH_SERVICE_URL is not set."
+        logger.critical(f"[ReportGenerator] {error_message}")
+        final_status = "FAILED"
+        request.status = final_status
+        request.error_message = error_message
+        await db.flush()
+        return # Cannot proceed without the service URL
+
+    # Ensure URL has http/https scheme
+    if not odr_service_url.startswith(('http://', 'https://')):
+        odr_service_url = f"http://{odr_service_url}" # Default to http for internal service
+
+    # Define the endpoint within the ODR service (adjust if needed)
+    odr_endpoint = f"{odr_service_url.rstrip('/')}/api/report" # Assuming ODR exposes /api/report
 
     try:
-        # 1. Update status to PROCESSING (Commit handled by worker loop)
+        # 1. Update status to PROCESSING
         request.status = "PROCESSING"
-        await db.flush() # Flush to make change visible within transaction if needed elsewhere
-        print(f"[ReportGenerator] Set status to PROCESSING for request ID: {request.request_id}")
+        await db.flush()
+        logger.info(f"[ReportGenerator] Set status to PROCESSING for request ID: {request.request_id}")
 
-        # 2. Prepare command for open-deep-research
-        query = request.request_details
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        safe_query_part = "".join(c if c.isalnum() else "_" for c in query[:30])
-        output_filename = f"report_{request.request_id}_{safe_query_part}_{timestamp}.md"
-        output_path = os.path.join(REPORTS_OUTPUT_DIR, output_filename)
-
-        node_script_path = os.path.join(settings.OPEN_DEEP_RESEARCH_REPO_PATH, settings.OPEN_DEEP_RESEARCH_ENTRY_POINT)
-
-        if not os.path.exists(settings.NODE_EXECUTABLE_PATH):
-             raise FileNotFoundError(f"Node executable not found at: {settings.NODE_EXECUTABLE_PATH}")
-        if not os.path.exists(node_script_path):
-             raise FileNotFoundError(f"open-deep-research entry point not found at: {node_script_path}")
-
-        cmd = [
-            settings.NODE_EXECUTABLE_PATH,
-            node_script_path,
-            "--query", query,
-            "--output", output_path,
-        ]
-        # Add conditional arguments
+        # 2. Prepare payload for ODR service
+        # ODR service needs selectedResults (sources), prompt, and model
+        # Since this agent doesn't *select* sources, we pass the request details as the prompt
+        # and let ODR handle source finding based on its internal logic.
+        # We need to map our report_type to a model ODR understands.
+        model_to_use = settings.STANDARD_REPORT_MODEL
         if request.report_type == 'premium_999':
-            cmd.extend(["--depth", "5"])
-            cmd.extend(["--model", settings.PREMIUM_REPORT_MODEL or "google/gemini-1.5-pro-latest"])
-        else: # Standard or unknown
-            cmd.extend(["--model", settings.STANDARD_REPORT_MODEL or "google/gemini-1.5-flash-latest"])
+            model_to_use = settings.PREMIUM_REPORT_MODEL
 
-        print(f"[ReportGenerator] Executing command: {' '.join(cmd)} in {settings.OPEN_DEEP_RESEARCH_REPO_PATH}")
+        # Construct a payload similar to what the ODR frontend might send
+        # This structure needs to match what the ODR /api/report endpoint expects!
+        # Assuming it needs a query/prompt and model info.
+        # We don't have pre-selected results here, ODR needs to find them based on the query.
+        odr_payload = {
+            "query": request.request_details, # Use request details as the core query
+            "prompt": f"Generate a comprehensive report based on the query: '{request.request_details}'. Focus on providing deep insights and analysis.", # A more explicit prompt for the LLM via ODR
+            "platformModel": model_to_use, # Pass the selected model name
+            # ODR might need other parameters like depth, source count etc. Add them here if known.
+            # "depth": 5 if request.report_type == 'premium_999' else 3, # Example
+        }
+        logger.info(f"[ReportGenerator] Sending request to ODR service: {odr_endpoint} with query: '{request.request_details[:50]}...'")
 
-        # 3. Execute the open-deep-research tool using asyncio.create_subprocess_exec
-        process = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            cwd=settings.OPEN_DEEP_RESEARCH_REPO_PATH
-        )
+        # 3. Call the ODR service using httpx
+        async with get_httpx_client() as odr_client:
+            response = await odr_client.post(
+                odr_endpoint,
+                json=odr_payload,
+                timeout=ODR_SERVICE_TIMEOUT
+            )
+            response.raise_for_status() # Raise HTTPStatusError for 4xx/5xx responses
+            odr_result = response.json()
 
-        # Wait for the process to complete with a timeout
-        try:
-            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=report_timeout)
-        except asyncio.TimeoutError:
-            print(f"[ReportGenerator] Subprocess timed out after {report_timeout} seconds. Terminating.")
-            try:
-                process.terminate()
-                await asyncio.wait_for(process.wait(), timeout=5.0) # Wait briefly for termination
-            except asyncio.TimeoutError:
-                print("[ReportGenerator] Process did not terminate gracefully after timeout, killing.")
-                process.kill()
-            except ProcessLookupError:
-                pass # Process already finished
-            except Exception as term_e:
-                print(f"[ReportGenerator] Error during process termination: {term_e}")
-            raise TimeoutError(f"Report generation subprocess timed out after {report_timeout} seconds.") # Re-raise specific error
+        # 4. Process ODR service result
+        # Check if ODR result contains the expected report structure
+        # Adapt this based on the *actual* response structure of your odr-service /api/report
+        if isinstance(odr_result, dict) and "title" in odr_result and "summary" in odr_result and "sections" in odr_result:
+            logger.info(f"[ReportGenerator] Received successful report structure from ODR service for request {request.request_id}.")
+            # Reconstruct the report content from the structured JSON response
+            # This assumes ODR returns markdown content within sections.
+            raw_report_content = f"# {odr_result['title']}\n\n**Summary:**\n{odr_result['summary']}\n\n"
+            for section in odr_result.get('sections', []):
+                raw_report_content += f"## {section.get('title', 'Section')}\n{section.get('content', '')}\n\n"
 
-        stdout_decoded = stdout.decode(errors='ignore').strip() if stdout else ""
-        stderr_decoded = stderr.decode(errors='ignore').strip() if stderr else ""
+            # Handle sources if provided by ODR
+            sources = odr_result.get('sources', [])
+            if sources:
+                 raw_report_content += "---\n**Sources:**\n"
+                 for idx, source in enumerate(sources):
+                      source_num = odr_result.get('usedSources', list(range(1, len(sources) + 1)))[idx] if 'usedSources' in odr_result else idx + 1
+                      raw_report_content += f"[{source_num}] {source.get('name', 'Unknown Source')} - <{source.get('url', '#')}>\n"
 
-        print(f"[ReportGenerator] Subprocess exited with code: {process.returncode}")
-        if stdout_decoded: print(f"[ReportGenerator] Subprocess STDOUT:\n{stdout_decoded[:1000]}...")
-        if stderr_decoded: print(f"[ReportGenerator] Subprocess STDERR:\n{stderr_decoded[:1000]}...")
+            # Define output path for saving the cleaned report
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            safe_query_part = "".join(c if c.isalnum() else "_" for c in request.request_details[:30])
+            output_filename = f"report_{request.request_id}_{safe_query_part}_{timestamp}.md"
+            output_path = os.path.join(REPORTS_OUTPUT_DIR, output_filename)
 
-        # 4. Check result and clean
-        if process.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 50:
-            print(f"[ReportGenerator] Raw report generated successfully: {output_path}")
-            raw_content = ""
-            try:
-                with open(output_path, 'r', encoding='utf-8') as f:
-                    raw_content = f.read()
-            except Exception as read_e:
-                raise IOError(f"Failed to read generated report file {output_path}: {read_e}")
-
-            # Clean the content using LLM
+            # Clean the raw content using LLM
             client = await get_httpx_client()
             try:
-                cleaned_report_content = await clean_report_content(client, raw_content, output_filename)
+                cleaned_report_content = await clean_report_content(client, raw_report_content, output_filename)
             finally:
                 await client.aclose() # Ensure client is closed
 
-            # Overwrite the original file with cleaned content
+            # Save the cleaned content to the file
             try:
                 with open(output_path, 'w', encoding='utf-8') as f:
                     f.write(cleaned_report_content)
-                print(f"[ReportGenerator] Report cleaned and saved: {output_path}")
+                logger.info(f"[ReportGenerator] Report cleaned and saved: {output_path}")
+                final_status = "GENERATED" # Intermediate status before delivery attempt
+                process_success = True
+                error_message = None
             except Exception as write_e:
-                 raise IOError(f"Failed to write cleaned report file {output_path}: {write_e}")
+                 error_message = f"Failed to write cleaned report file {output_path}: {write_e}"
+                 logger.error(f"[ReportGenerator] {error_message}")
+                 final_status = "FAILED"
+                 output_path = None # Don't save path if write failed
 
-            final_status = "GENERATED" # Intermediate status before delivery attempt
-            process_success = True
-            error_message = None
-        elif process.returncode == 0:
-            error_message = "Generation process succeeded but output file is missing, empty or too small."
-            print(f"[ReportGenerator] Error: {error_message}")
-            if output_path and os.path.exists(output_path):
-                try: os.remove(output_path)
-                except OSError: pass
-            output_path = None # Don't save path if file is invalid
-            final_status = "FAILED"
         else:
-            error_message = f"Generation failed. Exit code: {process.returncode}. Stderr: {stderr_decoded[:500]}"
-            print(f"[ReportGenerator] Error: {error_message}")
-            if output_path and os.path.exists(output_path):
-                try: os.remove(output_path)
-                except OSError: pass
-            output_path = None
+            # Handle cases where ODR service returned an error or unexpected format
+            error_message = f"ODR service returned unexpected format or error. Response: {str(odr_result)[:500]}"
+            logger.error(f"[ReportGenerator] {error_message}")
             final_status = "FAILED"
+            output_path = None
 
-    except FileNotFoundError as e:
-        error_message = f"Execution failed: Command or script not found. Check paths in config. Error: {e}"
-        print(f"[ReportGenerator] Error: {error_message}")
+    except httpx.HTTPStatusError as e:
+        # Error calling the ODR service
+        error_body = ""
+        try: error_body = e.response.text[:500]
+        except Exception: pass
+        error_message = f"ODR service call failed: Status {e.response.status_code}. Response: {error_body}"
+        logger.error(f"[ReportGenerator] {error_message}")
         final_status = "FAILED"
         output_path = None
-    except TimeoutError as e: # Catch the specific re-raised error
-        error_message = str(e)
-        print(f"[ReportGenerator] Error: {error_message}")
+    except httpx.RequestError as e:
+        # Network error calling ODR service
+        error_message = f"Network error calling ODR service: {e}"
+        logger.error(f"[ReportGenerator] {error_message}")
+        final_status = "FAILED"
+        output_path = None
+    except asyncio.TimeoutError: # Catch timeout specifically if using asyncio.wait_for with httpx client timeout
+        error_message = f"ODR service call timed out after {ODR_SERVICE_TIMEOUT} seconds."
+        logger.error(f"[ReportGenerator] {error_message}")
         final_status = "FAILED"
         output_path = None
     except Exception as e:
         error_message = f"Unexpected error during report generation: {str(e)[:500]}" # Truncate long errors
-        print(f"[ReportGenerator] Error: {error_message}")
-        import traceback
-        traceback.print_exc()
+        logger.error(f"[ReportGenerator] Error: {error_message}", exc_info=True)
         final_status = "FAILED"
+        output_path = None
+        # Clean up potentially partially written file on unexpected error
         if output_path and os.path.exists(output_path):
             try: os.remove(output_path)
             except OSError: pass
-        output_path = None
-    # No finally block needed for client closing, handled within the success path
+            output_path = None
+    # --- MODIFICATION END ---
 
     # 5. Update DB object with generation status (Commit handled by worker loop)
     request.status = final_status
-    request.report_output_path = output_path
+    request.report_output_path = output_path # Path to the *cleaned* report
     request.error_message = error_message
     await db.flush() # Flush changes within the transaction
-    print(f"[ReportGenerator] Finished generation phase for request ID: {request.request_id} with status: {final_status}")
+    logger.info(f"[ReportGenerator] Finished generation phase for request ID: {request.request_id} with status: {final_status}")
 
     # --- 6. Attempt Delivery if Generation Succeeded ---
     if process_success and final_status == "GENERATED" and output_path:
         # Pass necessary info directly, _send_delivery_email gets its own session
         # Run delivery in background task to avoid blocking worker loop
-        print(f"[ReportGenerator] Scheduling delivery task for request ID: {request.request_id}")
+        logger.info(f"[ReportGenerator] Scheduling delivery task for request ID: {request.request_id}")
+        # Pass the cleaned content directly if available, otherwise None (delivery task will attach file)
         asyncio.create_task(_send_delivery_email(request.request_id, output_path, cleaned_report_content))
 
     elif final_status == "FAILED":
-         print(f"[ReportGenerator] Report generation failed for request {request.request_id}. No delivery attempted.")
+         logger.warning(f"[ReportGenerator] Report generation failed for request {request.request_id}. No delivery attempted.")
+
+# --- Worker Loop (Unchanged from previous version) ---
+async def report_generator_loop(shutdown_event: asyncio.Event):
+    """Main loop for the report generator worker."""
+    logger.info("[ReportWorker] Starting...")
+    while not shutdown_event.is_set():
+        session: AsyncSession = None
+        task_processed = False
+        try:
+            session = await get_worker_session()
+            # Fetch a pending task for this agent
+            pending_tasks = await crud.get_pending_tasks_for_agent(session, agent_name='ReportGenerator', limit=1)
+
+            if pending_tasks:
+                task = pending_tasks[0]
+                task_processed = True
+                logger.info(f"[ReportWorker] Processing task ID: {task.task_id}")
+                await crud.update_task_status(session, task.task_id, status='IN_PROGRESS')
+                await session.commit() # Commit status change
+
+                report_request_id = task.parameters.get('report_request_id')
+                if report_request_id:
+                    report_request = await crud.get_report_request(session, report_request_id)
+                    if report_request and report_request.status == 'AWAITING_GENERATION':
+                        # Process the report request (this function now handles its own status updates)
+                        await process_single_report_request(session, report_request)
+                        # Check final status of the report request after processing
+                        await session.refresh(report_request) # Refresh to get latest status
+                        if report_request.status in ['COMPLETED', 'GENERATED', 'DELIVERY_FAILED']: # Consider GENERATED as success for the task
+                            await crud.update_task_status(session, task.task_id, status='COMPLETED', result=f"Report processed with status: {report_request.status}")
+                        else: # FAILED
+                            await crud.update_task_status(session, task.task_id, status='FAILED', result=f"Report processing failed: {report_request.error_message}")
+                    elif report_request:
+                         logger.warning(f"[ReportWorker] ReportRequest {report_request_id} is not in AWAITING_GENERATION status (Status: {report_request.status}). Skipping task {task.task_id}.")
+                         await crud.update_task_status(session, task.task_id, status='FAILED', result=f"ReportRequest {report_request_id} not in AWAITING_GENERATION status.")
+                    else:
+                        logger.error(f"[ReportWorker] ReportRequest {report_request_id} not found for task {task.task_id}.")
+                        await crud.update_task_status(session, task.task_id, status='FAILED', result=f"ReportRequest {report_request_id} not found.")
+                else:
+                    logger.error(f"[ReportWorker] Task {task.task_id} missing 'report_request_id' parameter.")
+                    await crud.update_task_status(session, task.task_id, status='FAILED', result="Missing 'report_request_id' parameter.")
+
+                await session.commit() # Commit final task status
+            else:
+                # No pending tasks found, wait before checking again
+                pass # Wait happens outside the try block
+
+        except Exception as e:
+            logger.error(f"[ReportWorker] Error in main loop: {e}", exc_info=True)
+            if session:
+                await session.rollback() # Rollback any potential transaction issues
+            # Avoid busy-looping on persistent errors - wait longer
+            await asyncio.sleep(settings.REPORT_GENERATOR_INTERVAL_SECONDS * 5)
+        finally:
+            if session:
+                await session.close()
+
+        # Wait interval or handle shutdown
+        if not task_processed: # Only sleep if no task was processed
+            try:
+                await asyncio.wait_for(shutdown_event.wait(), timeout=settings.REPORT_GENERATOR_INTERVAL_SECONDS)
+                logger.info("[ReportWorker] Shutdown signal received during wait, exiting loop.")
+                break
+            except asyncio.TimeoutError:
+                pass # Normal timeout, continue loop
+            except Exception as e:
+                 logger.error(f"[ReportWorker] Error during wait: {e}")
+                 break # Exit loop on unexpected wait error
+        elif shutdown_event.is_set():
+             logger.info("[ReportWorker] Shutdown signal received after processing task, exiting loop.")
+             break
+
+    logger.info("[ReportWorker] Stopped.")
+
+
+async def run_report_generator_worker(shutdown_event: asyncio.Event):
+    """Entry point for running the worker, handles graceful shutdown."""
+    await report_generator_loop(shutdown_event)
+
+# --- Direct execution capability (optional, for testing) ---
+async def main():
+    print("Starting Report Generator Worker directly...")
+    shutdown_event = asyncio.Event()
+
+    # Load .env file for direct execution if needed
+    from dotenv import load_dotenv
+    dotenv_path = os.path.join(os.path.dirname(__file__), '..', '..', '.env')
+    load_dotenv(dotenv_path=dotenv_path)
+
+    def signal_handler():
+        print("Shutdown signal received!")
+        shutdown_event.set()
+
+    loop = asyncio.get_event_loop()
+    loop.add_signal_handler(signal.SIGINT, signal_handler)
+    loop.add_signal_handler(signal.SIGTERM, signal_handler)
+
+    await run_report_generator_worker(shutdown_event)
+
+if __name__ == "__main__":
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("Report Generator Worker stopped by user.")
