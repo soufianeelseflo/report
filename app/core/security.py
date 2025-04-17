@@ -1,63 +1,88 @@
+# autonomous_agency/app/core/security.py
 import base64
-from cryptography.fernet import Fernet
+import os
+import logging
+from cryptography.fernet import Fernet, InvalidToken
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
-from app.core.config import settings
-import os
 
-# Ensure the key is the correct length for Fernet (32 url-safe base64-encoded bytes)
-# We derive a key from the setting using PBKDF2HMAC for better practice if the key isn't pre-generated correctly.
+# Corrected relative import
+try:
+    from Acumenis.app.core.config import settings
+except ImportError:
+    print("[Security] WARNING: Using fallback imports.")
+    from app.core.config import settings
+
+logger = logging.getLogger(__name__)
+
+# --- Key Derivation (Use only if ENCRYPTION_KEY is not pre-generated correctly) ---
+# WARNING: Using a fixed salt is not ideal for production.
+# Prefer generating a strong 32-byte URL-safe base64 key and setting it directly.
+FIXED_SALT = b'acumenis_salt_16' # MUST be 16 bytes - Replace in production!
+
 def _derive_key(password: str, salt: bytes) -> bytes:
-    """Derives a Fernet key from a password string."""
+    """Derives a Fernet key from a password string using PBKDF2HMAC."""
     kdf = PBKDF2HMAC(
         algorithm=hashes.SHA256(),
         length=32,
         salt=salt,
-        iterations=480000, # OWASP recommendation as of 2023
+        iterations=600000, # Increased iterations (OWASP recommendation 2023+)
     )
     key = base64.urlsafe_b64encode(kdf.derive(password.encode()))
+    logger.info("Derived Fernet key from ENCRYPTION_KEY setting.")
     return key
 
-# Use a fixed salt stored alongside the key or derive from a setting.
-# For simplicity here, using a fixed salt. In production, manage this securely.
-# DO NOT use a hardcoded salt like this in real production without careful consideration.
-# It's better if the salt is unique per installation or stored securely.
-FIXED_SALT = b'a_fixed_salt_replace_me_16_bytes' # MUST be 16 bytes
-
+# --- Initialize Fernet ---
+fernet_instance: Optional[Fernet] = None
 try:
-    # Attempt to use the key directly if it's already valid base64
+    # Assume settings.ENCRYPTION_KEY is validated by config loader
     key_bytes = settings.ENCRYPTION_KEY.encode()
-    if len(base64.urlsafe_b64decode(key_bytes)) == 32:
-         fernet_key = key_bytes
-         print("Using provided ENCRYPTION_KEY directly.")
-    else:
-        print("Provided ENCRYPTION_KEY is not valid base64 or wrong length. Deriving key...")
-        fernet_key = _derive_key(settings.ENCRYPTION_KEY, FIXED_SALT)
-except Exception:
-    print("Error processing ENCRYPTION_KEY. Deriving key...")
-    fernet_key = _derive_key(settings.ENCRYPTION_KEY, FIXED_SALT)
+    # Check if it's already a valid key (32 URL-safe base64 bytes)
+    # The validator in config.py should handle this check now.
+    fernet_key = key_bytes
+    logger.info("Using provided ENCRYPTION_KEY for Fernet.")
+    fernet_instance = Fernet(fernet_key)
+except ValueError as e:
+    # This should ideally not happen if config validation works, but handle defensively
+    logger.critical(f"CRITICAL: ENCRYPTION_KEY validation failed during Fernet initialization: {e}. Security features will fail.")
+    # Optionally, attempt derivation as a last resort? Risky.
+    # logger.warning("Attempting to derive key from potentially invalid ENCRYPTION_KEY setting...")
+    # try:
+    #     fernet_key = _derive_key(settings.ENCRYPTION_KEY, FIXED_SALT)
+    #     fernet_instance = Fernet(fernet_key)
+    # except Exception as deriv_e:
+    #     logger.critical(f"FATAL: Failed to derive key after validation error: {deriv_e}. Cannot proceed.")
+    #     fernet_instance = None # Ensure it's None if init fails
+except Exception as e:
+    logger.critical(f"FATAL: Unexpected error initializing Fernet with ENCRYPTION_KEY: {e}", exc_info=True)
+    fernet_instance = None
 
-f = Fernet(fernet_key)
 
-def encrypt_data(data: str) -> str:
-    """Encrypts a string and returns it as a string."""
+def encrypt_data(data: str) -> Optional[str]:
+    """Encrypts a string and returns it as a string, or None on failure."""
+    if not fernet_instance:
+        logger.error("Encryption failed: Fernet not initialized (check ENCRYPTION_KEY).")
+        return None
     if not data:
-        return ""
-    return f.encrypt(data.encode()).decode()
-
-def decrypt_data(encrypted_data: str) -> str:
-    """Decrypts a string and returns it."""
-    if not encrypted_data:
-        return ""
+        return "" # Encrypting empty string is empty string
     try:
-        return f.decrypt(encrypted_data.encode()).decode()
+        return fernet_instance.encrypt(data.encode()).decode()
     except Exception as e:
-        print(f"Error decrypting data: {e}") # Log properly
-        # Handle error appropriately - return empty string, raise exception?
-        return "" # Or raise DecryptionError("Failed to decrypt")
+        logger.error(f"Encryption error: {e}", exc_info=True)
+        return None
 
-# Example usage (can be tested independently):
-# encrypted = encrypt_data("my secret password")
-# print(encrypted)
-# decrypted = decrypt_data(encrypted)
-# print(decrypted)
+def decrypt_data(encrypted_data: str) -> Optional[str]:
+    """Decrypts a string and returns it, or None on failure."""
+    if not fernet_instance:
+        logger.error("Decryption failed: Fernet not initialized (check ENCRYPTION_KEY).")
+        return None
+    if not encrypted_data:
+        return "" # Decrypting empty string is empty string
+    try:
+        return fernet_instance.decrypt(encrypted_data.encode()).decode()
+    except InvalidToken:
+        logger.error("Decryption failed: Invalid token (likely wrong key or corrupted data).")
+        return None
+    except Exception as e:
+        logger.error(f"Decryption error: {e}", exc_info=True)
+        return None
