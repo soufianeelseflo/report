@@ -16,12 +16,12 @@ import httpx # Needed for internal API call
 
 # Corrected relative imports for package structure
 try:
-    from Acumenis.app.core.config import settings
-    from Acumenis.app.db import crud, models
-    from Acumenis.app.db.base import get_worker_session # Import get_worker_session
-    from Acumenis.app.core.security import decrypt_data
+    from Nexus Plan.app.core.config import settings
+    from Nexus Plan.app.db import crud, models
+    from Nexus Plan.app.db.base import get_worker_session # Import get_worker_session
+    from Nexus Plan.app.core.security import decrypt_data
     # Import agent_utils for get_httpx_client and call_llm_api (for cleaning)
-    from Acumenis.app.agents.agent_utils import get_httpx_client, call_llm_api
+    from Nexus Plan.app.agents.agent_utils import get_httpx_client, call_llm_api
 except ImportError:
     print("[ReportGenerator] WARNING: Using fallback imports. Ensure package structure is correct for deployment.")
     from app.core.config import settings
@@ -131,13 +131,13 @@ async def _send_delivery_email(request_id: int, report_path: str, cleaned_conten
             await session.commit()
             return # Stop processing this email
 
-        report_filename_base = f"Acumenis_Report_{request.request_id}_{request.report_type}"
+        report_filename_base = f"Nexus Plan_Report_{request.request_id}_{request.report_type}"
         report_filename_md = f"{report_filename_base}.md"
 
-        subject = f"Your Acumenis AI Research Report is Ready! (Request ID: {request.request_id})"
+        subject = f"Your Nexus Plan AI Research Report is Ready! (Request ID: {request.request_id})"
         body_intro = f"Hi {request.client_name or 'Client'},\n\nYour requested AI research report (Request ID: {request.request_id}) has been generated successfully.\n\n"
         body_main = ""
-        body_outro = f"\n\nIf you have any questions or need further analysis, please don't hesitate to reach out.\n\nBest regards,\nThe Acumenis Team\n{settings.AGENCY_BASE_URL}"
+        body_outro = f"\n\nIf you have any questions or need further analysis, please don't hesitate to reach out.\n\nBest regards,\nThe Nexus Plan Team\n{settings.AGENCY_BASE_URL}"
 
         msg = EmailMessage()
         msg['Subject'] = subject

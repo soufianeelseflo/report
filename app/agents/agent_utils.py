@@ -16,10 +16,10 @@ from tenacity import retry, stop_after_attempt, wait_fixed, retry_if_exception, 
 # Corrected relative import for package structure
 try:
     # Use absolute path based on assumed project structure if possible
-    from Acumenis.app.core.config import settings
-    from Acumenis.app.db.base import get_worker_session
-    from Acumenis.app.db import crud
-    from Acumenis.app.core.security import decrypt_data
+    from Nexus Plan.app.core.config import settings
+    from Nexus Plan.app.db.base import get_worker_session
+    from Nexus Plan.app.db import crud
+    from Nexus Plan.app.core.security import decrypt_data
 except ImportError:
     print("[AgentUtils] WARNING: Using fallback imports. Ensure package structure is correct for deployment.")
     # Assume running from within app directory for fallback

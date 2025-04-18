@@ -3,7 +3,7 @@ version: '3.8'
 services:
   db:
     image: postgres:15-alpine
-    container_name: acumenis_prime_db # Keep consistent name
+    container_name: Nexus Plan_prime_db # Keep consistent name
     volumes:
       - postgres_data:/var/lib/postgresql/data
     environment:
@@ -23,7 +23,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile # Uses the same Dockerfile base
-    container_name: acumenis_prime_odr # Keep consistent name
+    container_name: Nexus Plan_prime_odr # Keep consistent name
     working_dir: /app/open-deep-research-main
     command: sh -c "npm install --omit=dev --legacy-peer-deps && npm run build && npm start -p 3000"
     restart: unless-stopped
@@ -46,11 +46,11 @@ services:
       PORT: '3000'
     # ports: # No need to expose internally
 
-  app: # Main Acumenis FastAPI App
+  app: # Main Nexus Plan FastAPI App
     build:
       context: .
       dockerfile: Dockerfile # Uses the same Dockerfile base
-    container_name: acumenis_prime_app # Keep consistent name
+    container_name: Nexus Plan_prime_app # Keep consistent name
     env_file:
       - .env # Load base .env if present
     environment:
@@ -80,7 +80,7 @@ services:
       PROXY_LIST: ${PROXY_LIST:-} # Allow list override
 
       # Other Settings (Can be overridden by Coolify)
-      EMAIL_SENDER_NAME: ${EMAIL_SENDER_NAME:-Acumenis AI}
+      EMAIL_SENDER_NAME: ${EMAIL_SENDER_NAME:-Nexus Plan AI}
       MCOL_IMPLEMENTATION_MODE: ${MCOL_IMPLEMENTATION_MODE:-EXECUTE_SAFE_CONFIG}
       OPEN_DEEP_RESEARCH_SERVICE_URL: "http://odr-service:3000" # Internal link
 

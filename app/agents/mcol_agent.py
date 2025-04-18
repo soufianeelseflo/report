@@ -14,13 +14,13 @@ import httpx
 
 # Corrected relative imports
 try:
-    from Acumenis.app.core.config import settings
-    from Acumenis.app.db import crud, models
-    from Acumenis.app.db.base import get_worker_session
+    from Nexus Plan.app.core.config import settings
+    from Nexus Plan.app.db import crud, models
+    from Nexus Plan.app.db.base import get_worker_session
     # MODIFIED: Import signal_proxy_rotation
-    from Acumenis.app.agents.agent_utils import get_httpx_client, call_llm_api, signal_proxy_rotation
-    from Acumenis.app.agents.agent_utils import NoValidApiKeyError, APIKeyFailedError # Import specific errors
-    from Acumenis.app.core.security import decrypt_data # Needed for get_single_key_status_info
+    from Nexus Plan.app.agents.agent_utils import get_httpx_client, call_llm_api, signal_proxy_rotation
+    from Nexus Plan.app.agents.agent_utils import NoValidApiKeyError, APIKeyFailedError # Import specific errors
+    from Nexus Plan.app.core.security import decrypt_data # Needed for get_single_key_status_info
 except ImportError:
     print("[MCOL Agent] WARNING: Using fallback imports.")
     from app.core.config import settings
@@ -180,10 +180,10 @@ async def analyze_performance_and_prioritize(client: httpx.AsyncClient, kpi_data
     """Uses LLM to analyze KPIs, identify the biggest problem (excluding key status)."""
     primary_goal = "Maximize profitable report sales ($499/$999) via autonomous prospecting and email marketing, operating reliably with a single API key and proxy rotation."
     system_context = f"""
-    System Overview: Autonomous agency 'Acumenis' using FastAPI, SQLAlchemy, PostgreSQL. Agents: ReportGenerator, ProspectResearcher, EmailMarketer, MCOL. Deployed via Docker at {settings.AGENCY_BASE_URL}. Payment via Lemon Squeezy. Website serving via FastAPI static files. Core LLM: Acumenis Prime (You). CRITICAL CONSTRAINT: System relies on a SINGLE OpenRouter API key with proxy rotation. KeyAcquirer is DISABLED.
+    System Overview: Autonomous agency 'Nexus Plan' using FastAPI, SQLAlchemy, PostgreSQL. Agents: ReportGenerator, ProspectResearcher, EmailMarketer, MCOL. Deployed via Docker at {settings.AGENCY_BASE_URL}. Payment via Lemon Squeezy. Website serving via FastAPI static files. Core LLM: Nexus Plan Prime (You). CRITICAL CONSTRAINT: System relies on a SINGLE OpenRouter API key with proxy rotation. KeyAcquirer is DISABLED.
     """
     prompt = f"""
-    Analyze the following system performance data for Acumenis, an autonomous AI reporting agency operating under a SINGLE API KEY constraint.
+    Analyze the following system performance data for Nexus Plan, an autonomous AI reporting agency operating under a SINGLE API KEY constraint.
     Primary Goal: {primary_goal}
     System Context: {system_context}
     Current KPIs:
@@ -225,7 +225,7 @@ async def analyze_performance_and_prioritize(client: httpx.AsyncClient, kpi_data
 async def generate_solution_strategies(client: httpx.AsyncClient, problem: str, reasoning: str, kpi_data_str: str) -> Optional[List[Dict[str, str]]]:
     """Generates strategies, focusing on SUGGEST or SAFE_CONFIG, avoiding KeyAcquirer triggers."""
     system_context = f"""
-    System: Acumenis Agency. FastAPI, SQLAlchemy, PostgreSQL, Docker. Agents: ReportGenerator, ProspectResearcher, EmailMarketer, MCOL. Core tool: 'open-deep-research' (internal service). Payment: Lemon Squeezy. Website: Static files. Budget: Minimal ($5 proxies). Uses SINGLE OpenRouter API key. Core LLM: Acumenis Prime (You). MCOL Mode: {MCOL_IMPLEMENTATION_MODE} (Forced to SUGGEST). KeyAcquirer DISABLED.
+    System: Nexus Plan Agency. FastAPI, SQLAlchemy, PostgreSQL, Docker. Agents: ReportGenerator, ProspectResearcher, EmailMarketer, MCOL. Core tool: 'open-deep-research' (internal service). Payment: Lemon Squeezy. Website: Static files. Budget: Minimal ($5 proxies). Uses SINGLE OpenRouter API key. Core LLM: Nexus Plan Prime (You). MCOL Mode: {MCOL_IMPLEMENTATION_MODE} (Forced to SUGGEST). KeyAcquirer DISABLED.
     """
     # Force SUGGEST mode focus
     implementation_focus = "focus ONLY on generating *clear, actionable suggestions* for a human operator. If config changes are needed (e.g., email delays, model choice, query lists), describe the parameter and suggested value clearly for manual update. If prompt tuning is needed, provide examples. Suggest checks the operator should perform. DO NOT suggest automated actions like starting workers or modifying code."
@@ -237,7 +237,7 @@ async def generate_solution_strategies(client: httpx.AsyncClient, problem: str, 
     - Current KPIs: {kpi_data_str}
     - System Context: {system_context}
 
-    Objective: Generate {MCOL_MAX_STRATEGIES} diverse, actionable strategies as SUGGESTIONS for the operator to solve the identified problem for Acumenis Agency. Prioritize low-cost, high-impact actions suitable for a single API key operation.
+    Objective: Generate {MCOL_MAX_STRATEGIES} diverse, actionable strategies as SUGGESTIONS for the operator to solve the identified problem for Nexus Plan Agency. Prioritize low-cost, high-impact actions suitable for a single API key operation.
     Implementation Focus: {implementation_focus}
 
     Instructions:

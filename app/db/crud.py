@@ -13,9 +13,9 @@ from sqlalchemy import func, cast, Float, Integer as SQLInteger, text, update, d
 try:
     from . import models
     # Ensure schemas are imported correctly if needed, adjust path if necessary
-    # from Acumenis.app.api import schemas
-    from Acumenis.app.core.config import settings # Import settings for variant IDs, etc.
-    from Acumenis.app.core.security import encrypt_data, decrypt_data # Import encryption functions
+    # from Nexus Plan.app.api import schemas
+    from Nexus Plan.app.core.config import settings # Import settings for variant IDs, etc.
+    from Nexus Plan.app.core.security import encrypt_data, decrypt_data # Import encryption functions
     from .models import ( # Import all relevant models
         KpiSnapshot, McolDecisionLog, ReportRequest, Prospect, EmailAccount, ApiKey, AgentTask
     )

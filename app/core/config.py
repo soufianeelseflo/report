@@ -9,7 +9,7 @@ import logging # Added logging
 logger = logging.getLogger(__name__)
 
 class Settings(BaseSettings):
-    PROJECT_NAME: str = "Acumenis AI Agency"
+    PROJECT_NAME: str = "Nexus Plan AI Agency"
     API_V1_STR: str = "/api/v1"
     VERSION: str = "3.1-Velocity" # Version tracking
 
@@ -168,7 +168,7 @@ class Settings(BaseSettings):
     # EMAIL_PASSWORD: Optional[str] = None
     # EMAIL_SMTP_HOST: Optional[str] = None
     # EMAIL_SMTP_PORT: Optional[int] = None
-    EMAIL_SENDER_NAME: str = "Acumenis AI Strategist" # Default sender name
+    EMAIL_SENDER_NAME: str = "Nexus Plan AI Strategist" # Default sender name
 
     class Config:
         env_file = ".env"

@@ -10,10 +10,10 @@ from typing import Optional
 
 # Corrected relative imports for package structure
 try:
-    from Acumenis.app.core.config import settings
-    from Acumenis.app.db import crud, models
-    from Acumenis.app.db.base import get_db_session
-    from Acumenis.app.api.schemas import CreateCheckoutRequest, CreateCheckoutResponse # Correct schema import path
+    from Nexus Plan.app.core.config import settings
+    from Nexus Plan.app.db import crud, models
+    from Nexus Plan.app.db.base import get_db_session
+    from Nexus Plan.app.api.schemas import CreateCheckoutRequest, CreateCheckoutResponse # Correct schema import path
 except ImportError:
     # Fallback for potential direct execution or different structure
     print("[PaymentsAPI] WARNING: Using fallback imports. Ensure package structure is correct for deployment.")
@@ -93,7 +93,7 @@ async def create_lemon_squeezy_checkout(
             "attributes": {
                 "checkout_options": {
                     "embed": False, # Use redirect flow for simplicity and robustness
-                    "button_color": "#22d3ee" # Acumenis accent cyan
+                    "button_color": "#22d3ee" # Nexus Plan accent cyan
                 },
                 "checkout_data": {
                     "email": payload.client_email, # Pre-fill email

@@ -18,11 +18,11 @@ import httpx
 
 # Corrected relative imports for package structure
 try:
-    from Acumenis.app.core.config import settings
-    from Acumenis.app.db import crud, models
-    from Acumenis.app.agents.agent_utils import get_httpx_client, call_llm_api
-    from Acumenis.app.core.security import decrypt_data
-    from Acumenis.app.db.base import get_worker_session # Import session getter
+    from Nexus Plan.app.core.config import settings
+    from Nexus Plan.app.db import crud, models
+    from Nexus Plan.app.agents.agent_utils import get_httpx_client, call_llm_api
+    from Nexus Plan.app.core.security import decrypt_data
+    from Nexus Plan.app.db.base import get_worker_session # Import session getter
 except ImportError:
     print("[EmailMarketer] WARNING: Using fallback imports. Ensure package structure is correct for deployment.")
     from app.core.config import settings
@@ -121,7 +121,7 @@ async def generate_personalized_email(client: httpx.AsyncClient, prospect: model
     Key Information:
     - Prospect: {greeting_name} @ {company_name}
     - Context/Signal: Detected signal related to: {signal_context}. This implies a potential vulnerability or missed opportunity regarding: "{pain_point}".
-    - Our Solution: Acumenis AI - We deliver deep competitive/market intelligence reports synthesized by advanced AI within HOURS. This provides [Specific Benefit, e.g., 'first-mover advantage', 'risk mitigation', 'competitor blindspot exploitation'].
+    - Our Solution: Nexus Plan AI - We deliver deep competitive/market intelligence reports synthesized by advanced AI within HOURS. This provides [Specific Benefit, e.g., 'first-mover advantage', 'risk mitigation', 'competitor blindspot exploitation'].
     - Offer: Standard ($499) / Premium ($999) report activation via link.
 
     Instructions:
@@ -129,7 +129,7 @@ async def generate_personalized_email(client: httpx.AsyncClient, prospect: model
     2.  **Email Body (Strict Max 75 words):**
         -   Opener: Direct reference to the signal/pain point (make it sound exclusive/discovered). E.g., "Saw [signal context] - looks like you need intel on [pain point] fast."
         -   Problem Agitation: Briefly state consequence of inaction (e.g., "Falling behind?", "Decision paralysis?", "Competitors moving?").
-        -   Solution Intro: Introduce Acumenis AI as the rapid antidote. Mention HOURS turnaround.
+        -   Solution Intro: Introduce Nexus Plan AI as the rapid antidote. Mention HOURS turnaround.
         -   Value Prop: State the core benefit bluntly. E.g., "Get actionable intel before rivals do."
         -   Call to Action (CTA): Use the placeholder "[Link to Order Page]". Frame as immediate action. Example: "Activate $499 stream now: [Link to Order Page]", "Get Nexus intel ($999): [Link to Order Page]".
     3.  **Tone:** Confident, direct, slightly mysterious, implies insider knowledge, extremely urgent, minimalist.

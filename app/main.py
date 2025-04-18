@@ -36,18 +36,18 @@ except ImportError as e:
     print(f"[MainApp] CRITICAL IMPORT ERROR: {e}. Check PYTHONPATH or package structure.")
     # Attempt fallback - less reliable
     try:
-        from Acumenis.app.core.config import settings
-        from Acumenis.app.api.endpoints import payments as api_payments
-        from Acumenis.app.db.base import engine as async_engine, Base as db_base, get_worker_session, get_db_session
-        from Acumenis.app.db import models, crud
-        from Acumenis.app.api import schemas
-        from Acumenis.app.agents.agent_utils import (
+        from Nexus Plan.app.core.config import settings
+        from Nexus Plan.app.api.endpoints import payments as api_payments
+        from Nexus Plan.app.db.base import engine as async_engine, Base as db_base, get_worker_session, get_db_session
+        from Nexus Plan.app.db import models, crud
+        from Nexus Plan.app.api import schemas
+        from Nexus Plan.app.agents.agent_utils import (
             # load_and_update_api_keys, # REMOVED
             # start_key_refresh_task, _key_refresh_task, # REMOVED
             # AVAILABLE_API_KEYS, _keys_loaded, # REMOVED
             shutdown_event
         )
-        print("[MainApp] WARNING: Using Acumenis fallback imports.")
+        print("[MainApp] WARNING: Using Nexus Plan fallback imports.")
     except ImportError:
          print("[MainApp] FATAL: Fallback imports also failed. Cannot proceed.")
          raise SystemExit("Failed to import critical application modules.")
@@ -164,11 +164,11 @@ def _import_runners():
     runners = {}
     # MODIFIED: Removed KeyAcquirer from the list
     worker_modules = [
-        ("report_generator", "Acumenis.app.workers.run_report_worker", "run_report_generator_worker"),
-        ("prospect_researcher", "Acumenis.app.workers.run_research_worker", "run_prospect_researcher_worker"),
-        ("email_marketer", "Acumenis.app.workers.run_email_worker", "run_email_marketer_worker"),
-        ("mcol", "Acumenis.app.workers.run_mcol_worker", "run_mcol_worker"),
-        # ("key_acquirer", "Acumenis.app.workers.run_key_acquirer_worker", "run_key_acquirer_worker"), # REMOVED
+        ("report_generator", "Nexus Plan.app.workers.run_report_worker", "run_report_generator_worker"),
+        ("prospect_researcher", "Nexus Plan.app.workers.run_research_worker", "run_prospect_researcher_worker"),
+        ("email_marketer", "Nexus Plan.app.workers.run_email_worker", "run_email_marketer_worker"),
+        ("mcol", "Nexus Plan.app.workers.run_mcol_worker", "run_mcol_worker"),
+        # ("key_acquirer", "Nexus Plan.app.workers.run_key_acquirer_worker", "run_key_acquirer_worker"), # REMOVED
     ]
     # Fallback path if primary fails
     fallback_worker_modules = [
@@ -187,7 +187,7 @@ def _import_runners():
         except ImportError:
             logger.warning(f"Could not import primary worker runner: {module_path}.{func_name}. Trying fallback...")
             try:
-                 fb_module_path = module_path.replace("Acumenis.app.", "app.")
+                 fb_module_path = module_path.replace("Nexus Plan.app.", "app.")
                  module = importlib.import_module(fb_module_path)
                  runners[name] = getattr(module, func_name)
                  logger.info(f"Successfully imported fallback runner for {name}.")
@@ -421,7 +421,7 @@ async def startup_event():
     logger.info(f"Access API at {settings.AGENCY_BASE_URL}{settings.API_V1_STR}")
     if STATIC_DIR: logger.info(f"Access Frontend at {settings.AGENCY_BASE_URL}/")
     if templates: logger.info(f"Access Control Panel at {settings.AGENCY_BASE_URL}/ui")
-    logger.warning("Acumenis Prime Operational. Velocity Protocol Engaged.")
+    logger.warning("Nexus Plan Prime Operational. Velocity Protocol Engaged.")
 
 
 @app.on_event("shutdown")

@@ -17,10 +17,10 @@ from tenacity import retry, stop_after_attempt, wait_fixed, retry_if_exception_t
 
 # Corrected relative imports for package structure
 try:
-    from Acumenis.app.core.config import settings
-    from Acumenis.app.db import crud, models
+    from Nexus Plan.app.core.config import settings
+    from Nexus Plan.app.db import crud, models
     # MODIFIED: Ensure get_httpx_client is used for proxied requests
-    from Acumenis.app.agents.agent_utils import get_httpx_client, call_llm_api, get_worker_session
+    from Nexus Plan.app.agents.agent_utils import get_httpx_client, call_llm_api, get_worker_session
     # Optional: Import Playwright if adding visual extraction
     # from playwright.async_api import async_playwright
 except ImportError:
@@ -68,7 +68,7 @@ async def infer_pain_points_llm(client: httpx.AsyncClient, company_name: str, co
     Analyze the following company information, paying close attention to the Deep Research Context if provided:
     {context}
 
-    Based *primarily* on the Deep Research Context (or the description if context is unavailable), infer 1-2 specific, high-probability business pain points this company might face related to data analysis, market intelligence, competitive research, or strategic reporting. These pain points should be directly addressable by Acumenis AI reports ($499/$999).
+    Based *primarily* on the Deep Research Context (or the description if context is unavailable), infer 1-2 specific, high-probability business pain points this company might face related to data analysis, market intelligence, competitive research, or strategic reporting. These pain points should be directly addressable by Nexus Plan AI reports ($499/$999).
     Focus on needs suggested by recent activities, challenges, or strategic directions mentioned in the context. Be concise and action-oriented. Frame them as potential needs or challenges. Avoid generic statements. If no clear pain point can be inferred from the provided information, respond with "None".
 
     Example format (if context mentioned competitor X launching feature Y):
