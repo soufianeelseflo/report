@@ -15,8 +15,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Dict, List, Optional, Callable, Awaitable
 
 # --- Core Application Imports ---
+# CORRECTED IMPORTS: Replaced "Nexus Plan.app" with "app"
 try:
-    # Assuming running from project root or PYTHONPATH is set
     from app.core.config import settings
     from app.api.endpoints import payments as api_payments
     from app.db.base import (
@@ -25,31 +25,26 @@ try:
     )
     from app.db import models, crud # Import crud
     from app.api import schemas # Import base schemas
-    # MODIFIED: Removed KeyAcquirer imports, kept agent_utils imports
     from app.agents.agent_utils import (
-        # load_and_update_api_keys, # REMOVED - No DB keys to load
-        # start_key_refresh_task, _key_refresh_task, # REMOVED - No refresh task
-        # AVAILABLE_API_KEYS, _keys_loaded, # REMOVED - Using single key
         shutdown_event # Import shared shutdown_event
     )
 except ImportError as e:
+    # Fallback for potential direct execution or different structure
     print(f"[MainApp] CRITICAL IMPORT ERROR: {e}. Check PYTHONPATH or package structure.")
     # Attempt fallback - less reliable
     try:
-        from Nexus Plan.app.core.config import settings
-        from Nexus Plan.app.api.endpoints import payments as api_payments
-        from Nexus Plan.app.db.base import engine as async_engine, Base as db_base, get_worker_session, get_db_session
-        from Nexus Plan.app.db import models, crud
-        from Nexus Plan.app.api import schemas
-        from Nexus Plan.app.agents.agent_utils import (
-            # load_and_update_api_keys, # REMOVED
-            # start_key_refresh_task, _key_refresh_task, # REMOVED
-            # AVAILABLE_API_KEYS, _keys_loaded, # REMOVED
+        # This fallback might still be problematic if the structure isn't exactly this
+        from app.core.config import settings
+        from app.api.endpoints import payments as api_payments
+        from app.db.base import engine as async_engine, Base as db_base, get_worker_session, get_db_session
+        from app.db import models, crud
+        from app.api import schemas
+        from app.agents.agent_utils import (
             shutdown_event
         )
-        print("[MainApp] WARNING: Using Nexus Plan fallback imports.")
-    except ImportError:
-         print("[MainApp] FATAL: Fallback imports also failed. Cannot proceed.")
+        print("[MainApp] WARNING: Using direct 'app.' fallback imports.")
+    except ImportError as fallback_e:
+         print(f"[MainApp] FATAL: Fallback imports also failed: {fallback_e}. Cannot proceed.")
          raise SystemExit("Failed to import critical application modules.")
 
 
@@ -162,21 +157,12 @@ def _import_runners():
     """Dynamically imports worker runner functions and populates WORKER_RUNNERS."""
     global WORKER_RUNNERS
     runners = {}
-    # MODIFIED: Removed KeyAcquirer from the list
+    # CORRECTED IMPORTS: Replaced "Nexus Plan.app" with "app"
     worker_modules = [
-        ("report_generator", "Nexus Plan.app.workers.run_report_worker", "run_report_generator_worker"),
-        ("prospect_researcher", "Nexus Plan.app.workers.run_research_worker", "run_prospect_researcher_worker"),
-        ("email_marketer", "Nexus Plan.app.workers.run_email_worker", "run_email_marketer_worker"),
-        ("mcol", "Nexus Plan.app.workers.run_mcol_worker", "run_mcol_worker"),
-        # ("key_acquirer", "Nexus Plan.app.workers.run_key_acquirer_worker", "run_key_acquirer_worker"), # REMOVED
-    ]
-    # Fallback path if primary fails
-    fallback_worker_modules = [
         ("report_generator", "app.workers.run_report_worker", "run_report_generator_worker"),
         ("prospect_researcher", "app.workers.run_research_worker", "run_prospect_researcher_worker"),
         ("email_marketer", "app.workers.run_email_worker", "run_email_marketer_worker"),
         ("mcol", "app.workers.run_mcol_worker", "run_mcol_worker"),
-        # ("key_acquirer", "app.workers.run_key_acquirer_worker", "run_key_acquirer_worker"), # REMOVED
     ]
 
     import importlib
@@ -184,15 +170,9 @@ def _import_runners():
         try:
             module = importlib.import_module(module_path)
             runners[name] = getattr(module, func_name)
-        except ImportError:
-            logger.warning(f"Could not import primary worker runner: {module_path}.{func_name}. Trying fallback...")
-            try:
-                 fb_module_path = module_path.replace("Nexus Plan.app.", "app.")
-                 module = importlib.import_module(fb_module_path)
-                 runners[name] = getattr(module, func_name)
-                 logger.info(f"Successfully imported fallback runner for {name}.")
-            except ImportError:
-                 logger.error(f"Could not import runner for worker '{name}' from primary or fallback path.")
+        except ImportError as e:
+            logger.error(f"Could not import runner for worker '{name}' from {module_path}: {e}")
+            # No fallback needed here as we corrected the primary path
 
     WORKER_RUNNERS = runners
     logger.info(f"Worker runners loaded for: {list(WORKER_RUNNERS.keys())}")
@@ -244,7 +224,6 @@ def _worker_task_done_callback(worker_name: str, task: asyncio.Task):
 
 async def stop_all_workers():
      """Internal function to signal workers to stop."""
-     # MODIFIED: Removed key refresh task stop
      if not shutdown_event.is_set():
         logger.info("Signaling all workers to stop via shared shutdown_event...")
         shutdown_event.set()
@@ -291,7 +270,6 @@ async def get_control_panel(request: Request):
     # Prepare data for the template (ensure all known workers are listed)
     template_data = {
         "request": request,
-        # MODIFIED: Filter workers based on WORKER_RUNNERS keys
         "workers": [{"name": name, "status": worker_status_info.get(name, "Unknown")} for name in WORKER_RUNNERS.keys()]
     }
     return templates.TemplateResponse("control_panel.html", template_data)
@@ -344,7 +322,7 @@ async def health_check(db: AsyncSession = Depends(get_db_session)): # Use manage
          logger.error(f"Health check DB connection failed: {e}", exc_info=False) # Keep log less verbose
          db_status = "DB Error"
 
-    # MODIFIED: Check if the single API key is configured
+    # Check if the single API key is configured
     key_status = "OK"
     if not settings.OPENROUTER_API_KEY:
         key_status = "API Key Missing"
@@ -393,23 +371,17 @@ async def startup_event():
 
     # 2. Import Worker Runners
     logger.info("Importing worker runners...")
-    _import_runners() # This now excludes KeyAcquirer runner
+    _import_runners()
 
     # 3. Verify Single API Key Presence
     logger.info("Verifying API key configuration...")
     if not settings.OPENROUTER_API_KEY:
          logger.critical("FATAL: OPENROUTER_API_KEY is not set in environment. LLM calls will fail.")
-         # Consider stopping startup if key is essential
          raise SystemExit("Missing required OPENROUTER_API_KEY")
     else:
          logger.info(f"Single API key found (...{settings.OPENROUTER_API_KEY[-4:]}).")
 
-    # 4. Start Background Key Refresh Task - REMOVED
-
-    # 5. Conditionally Start KeyAcquirer - REMOVED
-
-    # 6. Start Core Workers Automatically
-    # MODIFIED: Removed key_acquirer from core_workers list
+    # 4. Start Core Workers Automatically
     core_workers = ["report_generator", "prospect_researcher", "email_marketer", "mcol"]
     logger.info(f"Starting core workers: {', '.join(core_workers)}...")
     start_results = await asyncio.gather(*[_start_worker_task(name) for name in core_workers if name in WORKER_RUNNERS])
@@ -428,8 +400,6 @@ async def startup_event():
 async def shutdown_app_event():
     logger.info(f"--- {settings.PROJECT_NAME} Shutdown Sequence Initiated ---")
     await stop_all_workers() # Signal shared event first
-
-    # Cancel the key refresh task - REMOVED
 
     # Wait for worker tasks with timeout
     tasks_to_await = [task for task in worker_tasks.values() if task and not task.done()]

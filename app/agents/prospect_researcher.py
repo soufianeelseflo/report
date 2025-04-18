@@ -15,12 +15,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 import httpx
 from tenacity import retry, stop_after_attempt, wait_fixed, retry_if_exception_type
 
-# Corrected relative imports for package structure
+# CORRECTED IMPORTS: Replaced "Nexus Plan.app" with "app"
 try:
-    from Nexus Plan.app.core.config import settings
-    from Nexus Plan.app.db import crud, models
-    # MODIFIED: Ensure get_httpx_client is used for proxied requests
-    from Nexus Plan.app.agents.agent_utils import get_httpx_client, call_llm_api, get_worker_session
+    from app.core.config import settings
+    from app.db import crud, models
+    from app.agents.agent_utils import get_httpx_client, call_llm_api, get_worker_session
     # Optional: Import Playwright if adding visual extraction
     # from playwright.async_api import async_playwright
 except ImportError:

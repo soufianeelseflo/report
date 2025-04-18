@@ -14,14 +14,13 @@ import aiosmtplib
 from sqlalchemy.ext.asyncio import AsyncSession
 import httpx # Needed for internal API call
 
-# Corrected relative imports for package structure
+# CORRECTED IMPORTS: Replaced "Nexus Plan.app" with "app"
 try:
-    from Nexus Plan.app.core.config import settings
-    from Nexus Plan.app.db import crud, models
-    from Nexus Plan.app.db.base import get_worker_session # Import get_worker_session
-    from Nexus Plan.app.core.security import decrypt_data
-    # Import agent_utils for get_httpx_client and call_llm_api (for cleaning)
-    from Nexus Plan.app.agents.agent_utils import get_httpx_client, call_llm_api
+    from app.core.config import settings
+    from app.db import crud, models
+    from app.db.base import get_worker_session # Import get_worker_session
+    from app.core.security import decrypt_data
+    from app.agents.agent_utils import get_httpx_client, call_llm_api
 except ImportError:
     print("[ReportGenerator] WARNING: Using fallback imports. Ensure package structure is correct for deployment.")
     from app.core.config import settings
@@ -33,7 +32,10 @@ except ImportError:
 
 # Setup logger
 logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+# Ensure logger is configured (e.g., in main.py or here)
+if not logger.hasHandlers():
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - [%(funcName)s] - %(message)s')
+
 
 # Define where reports will be stored (relative to the app root inside the container)
 REPORTS_OUTPUT_DIR = "/app/generated_reports"
@@ -250,7 +252,7 @@ async def process_single_report_request(db: AsyncSession, request: models.Report
         return # Cannot proceed without the service URL
 
     # Ensure URL has http/https scheme
-    if not odr_service_url.startswith(('http://', 'https://')):
+    if not str(odr_service_url).startswith(('http://', 'https://')):
         odr_service_url = f"http://{odr_service_url}" # Default to http for internal service
 
     # Define the endpoint within the ODR service (adjust if needed)
@@ -490,8 +492,11 @@ async def main():
         shutdown_event.set()
 
     loop = asyncio.get_event_loop()
-    loop.add_signal_handler(signal.SIGINT, signal_handler)
-    loop.add_signal_handler(signal.SIGTERM, signal_handler)
+    # Use add_signal_handler for POSIX systems
+    if hasattr(signal, 'SIGINT'):
+        loop.add_signal_handler(signal.SIGINT, signal_handler)
+    if hasattr(signal, 'SIGTERM'):
+        loop.add_signal_handler(signal.SIGTERM, signal_handler)
 
     await run_report_generator_worker(shutdown_event)
 

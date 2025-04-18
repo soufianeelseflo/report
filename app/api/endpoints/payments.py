@@ -3,17 +3,19 @@ import hmac
 import hashlib
 import json
 import logging
+import datetime # Added missing import
 from fastapi import APIRouter, Depends, HTTPException, status, Request, Header, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select # Added missing import
 import httpx
 from typing import Optional
 
-# Corrected relative imports for package structure
+# CORRECTED IMPORTS: Replaced "Nexus Plan.app" with "app"
 try:
-    from Nexus Plan.app.core.config import settings
-    from Nexus Plan.app.db import crud, models
-    from Nexus Plan.app.db.base import get_db_session
-    from Nexus Plan.app.api.schemas import CreateCheckoutRequest, CreateCheckoutResponse # Correct schema import path
+    from app.core.config import settings
+    from app.db import crud, models
+    from app.db.base import get_db_session
+    from app.api.schemas import CreateCheckoutRequest, CreateCheckoutResponse # Correct schema import path
 except ImportError:
     # Fallback for potential direct execution or different structure
     print("[PaymentsAPI] WARNING: Using fallback imports. Ensure package structure is correct for deployment.")
@@ -204,7 +206,8 @@ async def lemon_squeezy_webhook(
             # --- Transactional Update ---
             # get_db_session dependency handles commit/rollback
             try:
-                report_request = await crud.create_initial_report_request(db, order_data, custom_data_webhook)
+                # Pass order_data directly, crud function expects the full dict
+                report_request = await crud.create_initial_report_request(db, order_data)
 
                 if report_request:
                     # Determine priority based on report type

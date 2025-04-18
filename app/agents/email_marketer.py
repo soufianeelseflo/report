@@ -16,13 +16,13 @@ from sqlalchemy import select # Import select
 from tenacity import retry, stop_after_attempt, wait_fixed, retry_if_exception_type, wait_random_exponential # Added wait_random_exponential
 import httpx
 
-# Corrected relative imports for package structure
+# CORRECTED IMPORTS: Replaced "Nexus Plan.app" with "app"
 try:
-    from Nexus Plan.app.core.config import settings
-    from Nexus Plan.app.db import crud, models
-    from Nexus Plan.app.agents.agent_utils import get_httpx_client, call_llm_api
-    from Nexus Plan.app.core.security import decrypt_data
-    from Nexus Plan.app.db.base import get_worker_session # Import session getter
+    from app.core.config import settings
+    from app.db import crud, models
+    from app.agents.agent_utils import get_httpx_client, call_llm_api
+    from app.core.security import decrypt_data
+    from app.db.base import get_worker_session # Import session getter
 except ImportError:
     print("[EmailMarketer] WARNING: Using fallback imports. Ensure package structure is correct for deployment.")
     from app.core.config import settings

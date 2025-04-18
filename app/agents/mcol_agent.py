@@ -12,15 +12,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select # Import select
 import httpx
 
-# Corrected relative imports
+# CORRECTED IMPORTS: Replaced "Nexus Plan.app" with "app"
 try:
-    from Nexus Plan.app.core.config import settings
-    from Nexus Plan.app.db import crud, models
-    from Nexus Plan.app.db.base import get_worker_session
-    # MODIFIED: Import signal_proxy_rotation
-    from Nexus Plan.app.agents.agent_utils import get_httpx_client, call_llm_api, signal_proxy_rotation
-    from Nexus Plan.app.agents.agent_utils import NoValidApiKeyError, APIKeyFailedError # Import specific errors
-    from Nexus Plan.app.core.security import decrypt_data # Needed for get_single_key_status_info
+    from app.core.config import settings
+    from app.db import crud, models
+    from app.db.base import get_worker_session
+    from app.agents.agent_utils import get_httpx_client, call_llm_api, signal_proxy_rotation
+    from app.agents.agent_utils import NoValidApiKeyError, APIKeyFailedError # Import specific errors
+    from app.core.security import decrypt_data # Needed for get_single_key_status_info
 except ImportError:
     print("[MCOL Agent] WARNING: Using fallback imports.")
     from app.core.config import settings
@@ -253,7 +252,7 @@ async def generate_solution_strategies(client: httpx.AsyncClient, problem: str, 
     logger.info(f"[MCOL] Generating strategies for problem: {problem} (Mode: SUGGEST)")
     try:
         llm_response = await call_llm_api(client, prompt, model="google/gemini-1.5-pro-latest")
-    except (NoValidApiKeyError, APIKeyInvalidError) as key_err:
+    except (NoValidApiKeyError, APIKeyFailedError) as key_err: # Corrected exception name
          logger.error(f"[MCOL] Cannot generate strategies, API key issue detected: {key_err}")
          return None
     except Exception as e:

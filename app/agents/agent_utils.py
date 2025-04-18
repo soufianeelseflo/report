@@ -13,13 +13,12 @@ import ssl # For checking SSL errors specifically
 from sqlalchemy.ext.asyncio import AsyncSession
 from tenacity import retry, stop_after_attempt, wait_fixed, retry_if_exception, RetryError, wait_exponential
 
-# Corrected relative import for package structure
+# CORRECTED IMPORTS: Replaced "Nexus Plan.app" with "app"
 try:
-    # Use absolute path based on assumed project structure if possible
-    from Nexus Plan.app.core.config import settings
-    from Nexus Plan.app.db.base import get_worker_session
-    from Nexus Plan.app.db import crud
-    from Nexus Plan.app.core.security import decrypt_data
+    from app.core.config import settings
+    from app.db.base import get_worker_session
+    from app.db import crud
+    from app.core.security import decrypt_data
 except ImportError:
     print("[AgentUtils] WARNING: Using fallback imports. Ensure package structure is correct for deployment.")
     # Assume running from within app directory for fallback
@@ -55,14 +54,6 @@ RATE_LIMIT_COOLDOWN_SECONDS = getattr(settings, 'RATE_LIMIT_COOLDOWN_SECONDS', 6
 
 # --- Global variables ---
 # We only use the single key from settings now
-# AVAILABLE_API_KEYS: List[Dict[str, Any]] = [] # REMOVED
-# CURRENT_KEY_INDEX: int = 0 # REMOVED
-# _keys_loaded: bool = False # REMOVED
-# _key_load_lock = asyncio.Lock() # REMOVED
-
-# --- Key Refresh Task ---
-# _key_refresh_task: Optional[asyncio.Task] = None # REMOVED
-# _key_refresh_interval: int = 300 # REMOVED
 shutdown_event = asyncio.Event() # Shared shutdown event
 
 # --- Proxy Rotation State ---
