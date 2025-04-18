@@ -1,31 +1,31 @@
-# Core Framework & Server
-fastapi==0.111.0
-uvicorn[standard]==0.29.0
-pydantic==2.7.1
-pydantic-settings==2.2.1
+# Core Framework & Server (Stable & Performant)
+fastapi>=0.111.0,<0.112.0 # Pin to a stable minor version, allow patches
+uvicorn[standard]>=0.29.0,<0.30.0
+pydantic>=2.7.1,<2.8.0
+pydantic-settings>=2.2.1,<2.3.0
 
-# Database (Async PostgreSQL)
-sqlalchemy[asyncio]==2.0.30
-asyncpg==0.29.0
-alembic==1.13.1
-psycopg2-binary==2.9.9 # Needed by Alembic even for async
+# Database (Async PostgreSQL - Stable)
+sqlalchemy[asyncio]>=2.0.30,<2.1.0
+asyncpg>=0.29.0,<0.30.0
+alembic>=1.13.1,<1.14.0
+psycopg2-binary>=2.9.9,<2.10.0 # Needed by Alembic
 
-# HTTP Requests & Scraping
-httpx[http2]==0.27.0
-beautifulsoup4==4.12.3
-# playwright==1.44.0 # Optional: Uncomment if heavy JS scraping needed
+# HTTP Requests & Visual Automation (CRITICAL)
+httpx[http2]>=0.27.0,<0.28.0
+beautifulsoup4>=4.12.3,<4.13.0 # Still useful for parsing non-JS sites/email content? Keep for now.
+playwright>=1.44.0,<1.45.0 # *** ESSENTIAL for visual KeyAcquirer ***
 
-# Email
-aiosmtplib==3.0.1
+# Email (Stable)
+aiosmtplib>=3.0.1,<3.1.0
 
-# Utilities
-python-dotenv==1.0.1
-tenacity==8.3.0 # For retries
-pycryptodome==3.20.0 # For potential encryption of sensitive data like SMTP passwords
+# Utilities (Stable & Necessary)
+python-dotenv>=1.0.1,<1.1.0
+tenacity>=8.3.0,<8.4.0 # For retries
+pycryptodome>=3.20.0,<3.21.0 # For encryption
 
-# Payment Integration
-lemonsqueezy.py==1.1.0 # Add Lemon Squeezy library
-openrouter-api
+# Payment Integration (Corrected & Stable)
+lemonsqueezy>=1.1.0,<1.2.0 # Correct package name
 
-# Git interaction (if needed for repo updates)
-# GitPython==3.1.43
+# --- OPTIONAL / CONTEXTUAL ---
+# Git interaction (Only if MCOL or other process needs repo interaction)
+# GitPython>=3.1.43,<3.2.0
