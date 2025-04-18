@@ -1,50 +1,63 @@
+# autonomous_agency/app/workers/run_mcol_worker.py
 import asyncio
 import signal
+import logging
 from sqlalchemy.ext.asyncio import AsyncSession
 
-# Adjust config import if needed based on final structure
+# Use absolute imports
 from app.core.config import settings
 from app.db.base import get_worker_session
-from app.agents.mcol_agent import run_mcol_cycle, MCOL_ANALYSIS_INTERVAL_SECONDS
+from app.agents.mcol_agent import run_mcol_cycle
+
+logger = logging.getLogger(__name__)
 
 async def mcol_worker_loop(shutdown_event: asyncio.Event):
     """Main loop for the MCOL worker."""
-    print("[MCOLWorker] Starting...")
+    logger.info("MCOL Worker starting...")
     while not shutdown_event.is_set():
         session: AsyncSession = None
+        cycle_start_time = asyncio.get_event_loop().time()
         try:
-            # print(f"[MCOLWorker] Starting next analysis cycle at {asyncio.get_event_loop().time():.2f}")
+            logger.debug("Starting MCOL analysis cycle.")
             session = await get_worker_session()
-            # Pass shutdown_event down if needed by run_mcol_cycle for long tasks
+            # Pass shutdown_event down for potential long-running analysis steps
             await run_mcol_cycle(session, shutdown_event)
+            # run_mcol_cycle handles its own commits/rollbacks
 
-            # Wait for the configured interval before the next cycle
-            wait_time = MCOL_ANALYSIS_INTERVAL_SECONDS
+            cycle_duration = asyncio.get_event_loop().time() - cycle_start_time
+            wait_time = max(0, settings.MCOL_ANALYSIS_INTERVAL_SECONDS - cycle_duration)
+            logger.debug(f"MCOL cycle finished in {cycle_duration:.2f}s. Waiting {wait_time:.2f}s.")
 
         except Exception as e:
-            print(f"[MCOLWorker] Error in main loop: {e}")
-            # Log the error properly
+            logger.error(f"Error in mcol_worker_loop: {e}", exc_info=True)
             if session:
-                await session.rollback() # Ensure rollback on loop-level error
-            # Use the standard interval even after error
-            wait_time = MCOL_ANALYSIS_INTERVAL_SECONDS
-            print(f"[MCOLWorker] Error occurred. Waiting {wait_time} seconds before retrying.")
+                try:
+                    await session.rollback()
+                except Exception as rollback_e:
+                    logger.error(f"Error during session rollback: {rollback_e}", exc_info=True)
+            # Use a longer, fixed wait time after an error
+            wait_time = settings.MCOL_ANALYSIS_INTERVAL_SECONDS * 2
+            logger.info(f"Error occurred. Waiting {wait_time} seconds before next cycle.")
         finally:
             if session:
-                await session.close()
+                try:
+                    await session.close()
+                except Exception as close_e:
+                    logger.error(f"Error closing session: {close_e}", exc_info=True)
 
-        # Wait interval or handle shutdown
-        try:
-            await asyncio.wait_for(shutdown_event.wait(), timeout=wait_time)
-            print("[MCOLWorker] Shutdown signal received during wait, exiting loop.")
-            break
-        except asyncio.TimeoutError:
-            pass # Normal timeout, continue loop
-        except Exception as e:
-             print(f"[MCOLWorker] Error during wait: {e}")
-             break # Exit loop on unexpected wait error
+        # Wait interval or handle shutdown gracefully
+        if not shutdown_event.is_set():
+            try:
+                await asyncio.wait_for(shutdown_event.wait(), timeout=wait_time)
+                logger.info("Shutdown signal received during wait, exiting loop.")
+                break
+            except asyncio.TimeoutError:
+                continue # Normal timeout
+            except Exception as e:
+                 logger.error(f"Error during worker wait: {e}", exc_info=True)
+                 break
 
-    print("[MCOLWorker] Stopped.")
+    logger.info("MCOL Worker stopped.")
 
 
 async def run_mcol_worker(shutdown_event: asyncio.Event):
@@ -52,42 +65,50 @@ async def run_mcol_worker(shutdown_event: asyncio.Event):
     await mcol_worker_loop(shutdown_event)
 
 
-# --- Direct execution capability (optional, for testing) ---
+# --- Direct execution capability (for testing) ---
 async def main():
-    print("Starting MCOL Worker directly...")
-    shutdown_event = asyncio.Event()
+    print("Starting MCOL Worker directly (for testing)...")
+    local_shutdown_event = asyncio.Event()
 
-    # Load .env file for direct execution
+    # Load .env file
+    print("Attempting to load .env file...")
     from dotenv import load_dotenv
     import os
-    # Adjust path relative to this file's location
-    dotenv_path = os.path.join(os.path.dirname(__file__), '..', '..', '.env')
-    if not os.path.exists(dotenv_path):
-         # Try one level up if running from project root perhaps?
-         dotenv_path = os.path.join(os.path.dirname(__file__), '..', '..', '..', '.env')
-    load_dotenv(dotenv_path=dotenv_path)
-    print(f"Attempting to load .env from: {dotenv_path}")
-    # Verify DB settings loaded
-    print(f"DB Server from env: {os.getenv('POSTGRES_SERVER')}")
+    script_dir = os.path.dirname(__file__)
+    dotenv_path = os.path.abspath(os.path.join(script_dir, '..', '..', '.env'))
+    if os.path.exists(dotenv_path):
+        load_dotenv(dotenv_path=dotenv_path)
+        print(f"Loaded .env from: {dotenv_path}")
+    else:
+        print(f"Warning: .env file not found at {dotenv_path}")
 
+    # Setup basic logging
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - [%(funcName)s] - %(message)s')
+
+    # Check DB readiness before starting loop (essential for MCOL)
+    print("Checking DB connection...")
+    from app.main import check_db_connection # Reuse check from main app
+    if not await check_db_connection(retries=3, delay=5):
+        print("FATAL: Database not ready. MCOL worker cannot start.")
+        return
 
     def signal_handler():
-        print("MCOL Shutdown signal received!")
-        shutdown_event.set()
+        print("MCOL Shutdown signal received! Signaling worker to stop...")
+        local_shutdown_event.set()
 
     loop = asyncio.get_event_loop()
-    loop.add_signal_handler(signal.SIGINT, signal_handler)
-    loop.add_signal_handler(signal.SIGTERM, signal_handler)
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        loop.add_signal_handler(sig, signal_handler)
 
-    # Ensure DB is ready before starting (useful for direct run)
-    # Add a small delay or a check similar to docker-entrypoint
-    print("Waiting 5s for DB to potentially start...")
-    await asyncio.sleep(5)
-
-    await run_mcol_worker(shutdown_event)
+    try:
+        await run_mcol_worker(local_shutdown_event)
+    except Exception as e:
+        print(f"Worker exited with error: {e}")
+    finally:
+        print("MCOL Worker main task finished.")
 
 if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        print("MCOL Worker stopped by user.")
+        print("MCOL Worker stopped by user (KeyboardInterrupt).")

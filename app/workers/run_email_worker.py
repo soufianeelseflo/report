@@ -1,85 +1,110 @@
+# autonomous_agency/app/workers/run_email_worker.py
 import asyncio
 import signal
+import logging
 from sqlalchemy.ext.asyncio import AsyncSession
 
+# Use absolute imports for clarity and robustness
 from app.core.config import settings
 from app.db.base import get_worker_session
 from app.agents.email_marketer import process_email_batch
 
+logger = logging.getLogger(__name__)
+
 async def email_marketer_loop(shutdown_event: asyncio.Event):
     """Main loop for the email marketer worker."""
-    print("[EmailWorker] Starting...")
+    logger.info("Email Marketer Worker starting...")
     while not shutdown_event.is_set():
         session: AsyncSession = None
+        cycle_start_time = asyncio.get_event_loop().time()
         try:
-            # print(f"[EmailWorker] Checking for prospects to email at {asyncio.get_event_loop().time():.2f}")
+            logger.debug("Starting email batch processing cycle.")
             session = await get_worker_session()
-            # Pass shutdown_event down to the batch processor
+            # Pass shutdown_event down to the batch processor for early exit within the batch
             await process_email_batch(session, shutdown_event)
             # process_email_batch handles its own commits/rollbacks per prospect
 
-            # Wait for the configured interval before the next cycle
-            wait_time = settings.EMAIL_MARKETER_INTERVAL_SECONDS
+            cycle_duration = asyncio.get_event_loop().time() - cycle_start_time
+            wait_time = max(0, settings.EMAIL_MARKETER_INTERVAL_SECONDS - cycle_duration)
+            logger.debug(f"Email batch cycle finished in {cycle_duration:.2f}s. Waiting {wait_time:.2f}s.")
 
         except Exception as e:
-            print(f"[EmailWorker] Error in main loop: {e}")
-            # Log the error properly
+            logger.error(f"Error in email_marketer_loop: {e}", exc_info=True)
             if session:
-                await session.rollback() # Ensure rollback on loop-level error
-            # Use the standard interval even after error to avoid hammering
-            wait_time = settings.EMAIL_MARKETER_INTERVAL_SECONDS
-            print(f"[EmailWorker] Error occurred. Waiting {wait_time} seconds before retrying.")
+                try:
+                    await session.rollback() # Ensure rollback on loop-level error
+                except Exception as rollback_e:
+                    logger.error(f"Error during session rollback: {rollback_e}", exc_info=True)
+            # Use a longer, fixed wait time after an error to prevent rapid failure loops
+            wait_time = settings.EMAIL_MARKETER_INTERVAL_SECONDS * 3
+            logger.info(f"Error occurred. Waiting {wait_time} seconds before next cycle.")
         finally:
             if session:
-                await session.close()
+                try:
+                    await session.close()
+                except Exception as close_e:
+                    logger.error(f"Error closing session: {close_e}", exc_info=True)
 
-        # Wait interval or handle shutdown
-        try:
-            # Wait for the interval, but break early if shutdown is signaled
-            await asyncio.wait_for(shutdown_event.wait(), timeout=wait_time)
-            # If wait_for completes without timeout, shutdown was signaled
-            print("[EmailWorker] Shutdown signal received during wait, exiting loop.")
-            break
-        except asyncio.TimeoutError:
-            # This is the normal case, timeout occurred, continue loop
-            pass
-        except Exception as e:
-            # Handle potential errors in wait_for itself
-             print(f"[EmailWorker] Error during wait: {e}")
-             break # Exit loop on unexpected wait error
+        # Wait interval or handle shutdown gracefully
+        if not shutdown_event.is_set():
+            try:
+                # Wait for the interval, but break early if shutdown is signaled
+                await asyncio.wait_for(shutdown_event.wait(), timeout=wait_time)
+                logger.info("Shutdown signal received during wait, exiting loop.")
+                break # Exit loop if shutdown_event is set during wait
+            except asyncio.TimeoutError:
+                continue # Normal timeout, continue to next loop iteration
+            except Exception as e:
+                 logger.error(f"Error during worker wait: {e}", exc_info=True)
+                 break # Exit loop on unexpected wait error
 
-    print("[EmailWorker] Stopped.")
+    logger.info("Email Marketer Worker stopped.")
 
 
 async def run_email_marketer_worker(shutdown_event: asyncio.Event):
-    """Entry point for running the worker, handles graceful shutdown."""
+    """Entry point for running the worker."""
+    # Potential setup specific to this worker could go here
     await email_marketer_loop(shutdown_event)
 
 
-# --- Direct execution capability (optional, for testing) ---
+# --- Direct execution capability (for testing) ---
 async def main():
-    print("Starting Email Marketer Worker directly...")
-    shutdown_event = asyncio.Event()
+    print("Starting Email Marketer Worker directly (for testing)...")
+    local_shutdown_event = asyncio.Event()
 
-    # Load .env file for direct execution if needed
+    # Load .env file for direct execution
+    print("Attempting to load .env file...")
     from dotenv import load_dotenv
     import os
-    dotenv_path = os.path.join(os.path.dirname(__file__), '..', '..', '.env')
-    load_dotenv(dotenv_path=dotenv_path)
+    # Adjust path calculation for robustness
+    script_dir = os.path.dirname(__file__)
+    dotenv_path = os.path.abspath(os.path.join(script_dir, '..', '..', '.env'))
+    if os.path.exists(dotenv_path):
+        load_dotenv(dotenv_path=dotenv_path)
+        print(f"Loaded .env from: {dotenv_path}")
+    else:
+        print(f"Warning: .env file not found at {dotenv_path}")
 
+    # Setup basic logging for direct run
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - [%(funcName)s] - %(message)s')
 
     def signal_handler():
-        print("Shutdown signal received!")
-        shutdown_event.set()
+        print("Shutdown signal received! Signaling worker to stop...")
+        local_shutdown_event.set()
 
     loop = asyncio.get_event_loop()
-    loop.add_signal_handler(signal.SIGINT, signal_handler)
-    loop.add_signal_handler(signal.SIGTERM, signal_handler)
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        loop.add_signal_handler(sig, signal_handler)
 
-    await run_email_marketer_worker(shutdown_event)
+    try:
+        await run_email_marketer_worker(local_shutdown_event)
+    except Exception as e:
+        print(f"Worker exited with error: {e}")
+    finally:
+        print("Email Marketer Worker main task finished.")
 
 if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        print("Email Marketer Worker stopped by user.")
+        print("Email Marketer Worker stopped by user (KeyboardInterrupt).")

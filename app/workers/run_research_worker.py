@@ -1,87 +1,106 @@
+# autonomous_agency/app/workers/run_research_worker.py
 import asyncio
 import signal
+import logging
 from sqlalchemy.ext.asyncio import AsyncSession
 
+# Use absolute imports
 from app.core.config import settings
 from app.db.base import get_worker_session
-# Corrected import path if run_prospecting_cycle is now directly in prospect_researcher.py
 from app.agents.prospect_researcher import run_prospecting_cycle
+
+logger = logging.getLogger(__name__)
 
 async def prospect_researcher_loop(shutdown_event: asyncio.Event):
     """Main loop for the prospect researcher worker."""
-    print("[ResearchWorker] Starting...")
+    logger.info("Prospect Researcher Worker starting...")
     while not shutdown_event.is_set():
         session: AsyncSession = None
+        cycle_start_time = asyncio.get_event_loop().time()
         try:
-            print(f"[ResearchWorker] Starting next prospecting cycle at {asyncio.get_event_loop().time():.2f}")
+            logger.info("Starting new prospecting cycle.")
             session = await get_worker_session()
-            # Pass shutdown_event down to the cycle runner
+            # Pass shutdown_event down to the cycle runner for early exit
             await run_prospecting_cycle(session, shutdown_event)
+            # run_prospecting_cycle handles its own commits/rollbacks per prospect
 
-            # Wait for the configured interval before the next cycle
-            wait_time = settings.PROSPECT_RESEARCHER_INTERVAL_SECONDS
-            print(f"[ResearchWorker] Cycle finished. Waiting {wait_time} seconds for next cycle.")
+            cycle_duration = asyncio.get_event_loop().time() - cycle_start_time
+            wait_time = max(0, settings.PROSPECT_RESEARCHER_INTERVAL_SECONDS - cycle_duration)
+            logger.info(f"Prospecting cycle finished in {cycle_duration:.2f}s. Waiting {wait_time:.2f}s for next cycle.")
 
         except Exception as e:
-            print(f"[ResearchWorker] Error in main loop: {e}")
-            # Log the error properly
+            logger.error(f"Error in prospect_researcher_loop: {e}", exc_info=True)
             if session:
-                await session.rollback() # Ensure rollback on loop-level error
-            # Use the standard interval even after error to avoid hammering
-            wait_time = settings.PROSPECT_RESEARCHER_INTERVAL_SECONDS
-            print(f"[ResearchWorker] Error occurred. Waiting {wait_time} seconds before retrying.")
+                try:
+                    await session.rollback()
+                except Exception as rollback_e:
+                    logger.error(f"Error during session rollback: {rollback_e}", exc_info=True)
+            # Use a shorter fixed wait time after an error to potentially recover faster,
+            # but not too short to cause hammering if the error is persistent.
+            wait_time = settings.PROSPECT_RESEARCHER_INTERVAL_SECONDS / 2
+            logger.info(f"Error occurred. Waiting {wait_time} seconds before next cycle.")
         finally:
             if session:
-                await session.close()
+                try:
+                    await session.close()
+                except Exception as close_e:
+                    logger.error(f"Error closing session: {close_e}", exc_info=True)
 
-        # Wait interval or handle shutdown
-        try:
-            # Wait for the interval, but break early if shutdown is signaled
-            await asyncio.wait_for(shutdown_event.wait(), timeout=wait_time)
-            # If wait_for completes without timeout, shutdown was signaled
-            print("[ResearchWorker] Shutdown signal received during wait, exiting loop.")
-            break
-        except asyncio.TimeoutError:
-            # This is the normal case, timeout occurred, continue loop
-            pass
-        except Exception as e:
-            # Handle potential errors in wait_for itself
-             print(f"[ResearchWorker] Error during wait: {e}")
-             break # Exit loop on unexpected wait error
+        # Wait interval or handle shutdown gracefully
+        if not shutdown_event.is_set():
+            try:
+                await asyncio.wait_for(shutdown_event.wait(), timeout=wait_time)
+                logger.info("Shutdown signal received during wait, exiting loop.")
+                break
+            except asyncio.TimeoutError:
+                continue # Normal timeout
+            except Exception as e:
+                 logger.error(f"Error during worker wait: {e}", exc_info=True)
+                 break
 
-    print("[ResearchWorker] Stopped.")
+    logger.info("Prospect Researcher Worker stopped.")
 
 
 async def run_prospect_researcher_worker(shutdown_event: asyncio.Event):
-    """Entry point for running the worker, handles graceful shutdown."""
+    """Entry point for running the worker."""
     await prospect_researcher_loop(shutdown_event)
 
 
-# --- Direct execution capability (optional, for testing) ---
+# --- Direct execution capability (for testing) ---
 async def main():
-    print("Starting Prospect Researcher Worker directly...")
-    shutdown_event = asyncio.Event()
+    print("Starting Prospect Researcher Worker directly (for testing)...")
+    local_shutdown_event = asyncio.Event()
 
-    # Load .env file for direct execution if needed
+    print("Attempting to load .env file...")
     from dotenv import load_dotenv
     import os
-    # Assuming .env is in the parent directory relative to workers/
-    dotenv_path = os.path.join(os.path.dirname(__file__), '..', '..', '.env')
-    load_dotenv(dotenv_path=dotenv_path)
+    script_dir = os.path.dirname(__file__)
+    dotenv_path = os.path.abspath(os.path.join(script_dir, '..', '..', '.env'))
+    if os.path.exists(dotenv_path):
+        load_dotenv(dotenv_path=dotenv_path)
+        print(f"Loaded .env from: {dotenv_path}")
+    else:
+        print(f"Warning: .env file not found at {dotenv_path}")
 
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - [%(funcName)s] - %(message)s')
 
     def signal_handler():
-        print("Shutdown signal received!")
-        shutdown_event.set()
+        print("Shutdown signal received! Signaling worker to stop...")
+        local_shutdown_event.set()
 
     loop = asyncio.get_event_loop()
-    loop.add_signal_handler(signal.SIGINT, signal_handler)
-    loop.add_signal_handler(signal.SIGTERM, signal_handler)
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        loop.add_signal_handler(sig, signal_handler)
 
-    await run_prospect_researcher_worker(shutdown_event)
+    try:
+        await run_prospect_researcher_worker(local_shutdown_event)
+    except Exception as e:
+        print(f"Worker exited with error: {e}")
+    finally:
+        print("Prospect Researcher Worker main task finished.")
 
 if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        print("Prospect Researcher Worker stopped by user.")
+        print("Prospect Researcher Worker stopped by user (KeyboardInterrupt).")
