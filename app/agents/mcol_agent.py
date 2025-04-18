@@ -9,6 +9,7 @@ import logging
 from typing import Optional, List, Dict, Any, Tuple
 
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select # Import select
 import httpx
 
 # Corrected relative imports
@@ -16,15 +17,18 @@ try:
     from Acumenis.app.core.config import settings
     from Acumenis.app.db import crud, models
     from Acumenis.app.db.base import get_worker_session
-    from Acumenis.app.agents.agent_utils import get_httpx_client, call_llm_api
-    from Acumenis.app.agents.agent_utils import NoValidApiKeyError, APIKeyInvalidError # Import specific errors
+    # MODIFIED: Import signal_proxy_rotation
+    from Acumenis.app.agents.agent_utils import get_httpx_client, call_llm_api, signal_proxy_rotation
+    from Acumenis.app.agents.agent_utils import NoValidApiKeyError, APIKeyFailedError # Import specific errors
+    from Acumenis.app.core.security import decrypt_data # Needed for get_single_key_status_info
 except ImportError:
     print("[MCOL Agent] WARNING: Using fallback imports.")
     from app.core.config import settings
     from app.db import crud, models
     from app.db.base import get_worker_session
-    from app.agents.agent_utils import get_httpx_client, call_llm_api
-    from app.agents.agent_utils import NoValidApiKeyError, APIKeyInvalidError
+    from app.agents.agent_utils import get_httpx_client, call_llm_api, signal_proxy_rotation
+    from app.agents.agent_utils import NoValidApiKeyError, APIKeyFailedError
+    from app.core.security import decrypt_data
 
 # Setup logger
 logger = logging.getLogger(__name__)
@@ -49,15 +53,15 @@ SINGLE_KEY_PROVIDER = settings.LLM_PROVIDER or "openrouter" # Provider for the s
 
 def format_kpis_for_llm(snapshot: models.KpiSnapshot) -> str:
     """Formats KPI snapshot data into a string for LLM analysis."""
-    # (Function unchanged)
     if not snapshot: return "No KPI data available."
-    # ... (rest of formatting as before) ...
     lines = [f"KPI Snapshot (Timestamp: {snapshot.timestamp}):"]
     lines.append(f"- Reports: AwaitingGen={getattr(snapshot, 'awaiting_generation_reports', 0)}, PendingTask={getattr(snapshot, 'pending_reports', 0)}, Processing={getattr(snapshot, 'processing_reports', 0)}, Completed(24h)={getattr(snapshot, 'completed_reports_24h', 0)}, Failed(24h)={getattr(snapshot, 'failed_reports_24h', 0)}, DeliveryFailed(24h)={getattr(snapshot, 'delivery_failed_reports_24h', 0)}, AvgTime={snapshot.avg_report_time_seconds or 0:.2f}s")
     lines.append(f"- Prospecting: New(24h)={getattr(snapshot, 'new_prospects_24h', 0)}")
     lines.append(f"- Email: Sent(24h)={getattr(snapshot, 'emails_sent_24h', 0)}, ActiveAccounts={getattr(snapshot, 'active_email_accounts', 0)}, Deactivated(24h)={getattr(snapshot, 'deactivated_accounts_24h', 0)}, BounceRate(24h)={snapshot.bounce_rate_24h or 0:.2f}%")
     lines.append(f"- Revenue: Orders(24h)={getattr(snapshot, 'orders_created_24h', 0)}, Revenue(24h)=${snapshot.revenue_24h:.2f}")
-    lines.append(f"- API Keys: Active={getattr(snapshot, 'active_api_keys', 0)}, Deactivated(24h)={getattr(snapshot, 'deactivated_api_keys_24h', 0)}")
+    # MODIFIED: Report active_api_keys based on whether the setting exists, not DB count
+    key_count = 1 if settings.OPENROUTER_API_KEY else 0
+    lines.append(f"- API Keys: Active={key_count}, Deactivated(24h)={getattr(snapshot, 'deactivated_api_keys_24h', 0)}")
     return "\n".join(lines)
 
 
@@ -70,10 +74,7 @@ async def get_single_key_status_info(db: AsyncSession) -> Dict[str, Any]:
     if not key_value:
         return {"status": "missing", "reason": "OPENROUTER_API_KEY not set in environment.", "rate_limited_until": None, "exists": False}
 
-    # Inefficiently find the key by value (necessary if ID isn't stored/known)
-    # This requires decrypting keys until a match is found.
-    # A better approach would be to store the *ID* of the operational key in config,
-    # but sticking to the current structure for now.
+    # Inefficiently find the key by value (necessary if only the value is known)
     target_key_obj: Optional[models.ApiKey] = None
     all_keys_stmt = select(models.ApiKey).where(models.ApiKey.provider == SINGLE_KEY_PROVIDER)
     all_keys_res = await db.execute(all_keys_stmt)
@@ -98,9 +99,9 @@ async def get_single_key_status_info(db: AsyncSession) -> Dict[str, Any]:
         }
     else:
         # Key from settings is not found in the database
-        logger.warning(f"The API key configured in settings (OPENROUTER_API_KEY) was not found in the database for provider '{SINGLE_KEY_PROVIDER}'.")
-        # Treat this as if the key is missing/invalid for operational purposes
-        return {"status": "missing", "reason": "Key from settings not found in DB.", "rate_limited_until": None, "exists": False}
+        logger.warning(f"The API key configured in settings (OPENROUTER_API_KEY) was not found in the database for provider '{SINGLE_KEY_PROVIDER}'. Assuming 'active' but untracked.")
+        # Treat as active but untracked in DB
+        return {"status": "active", "reason": "Key from settings not found in DB (assumed active).", "rate_limited_until": None, "exists": False}
 
 
 async def check_single_api_key_health(db: AsyncSession) -> Optional[Dict[str, Any]]:
@@ -113,7 +114,7 @@ async def check_single_api_key_health(db: AsyncSession) -> Optional[Dict[str, An
         key_status = key_info["status"]
         failure_reason = key_info["reason"]
         rate_limited_until = key_info["rate_limited_until"]
-        key_exists = key_info["exists"]
+        key_exists_in_db = key_info["exists"] # Whether the key was found in DB
         key_id = key_info.get("id") # Get ID if found
 
         now_utc = datetime.datetime.now(datetime.timezone.utc)
@@ -121,34 +122,39 @@ async def check_single_api_key_health(db: AsyncSession) -> Optional[Dict[str, An
         problem_desc = ""
         reasoning = ""
 
-        if not key_exists:
+        # Problem if key is missing from settings OR if it exists in DB but is not active/rate-limited
+        if key_status == "missing": # Key not set in env
+             is_problem = True
+             problem_desc = "CRITICAL: Operational API Key Not Configured"
+             reasoning = "The OPENROUTER_API_KEY environment variable is not set. System cannot function."
+        elif key_exists_in_db and key_status != 'active':
             is_problem = True
-            problem_desc = "CRITICAL: Operational API Key Not Found in DB"
-            reasoning = "The API key specified in OPENROUTER_API_KEY environment variable is missing from the database. Add the key manually or correct the environment variable."
-        elif key_status != 'active':
-            is_problem = True
-            problem_desc = f"CRITICAL: Operational API Key Status is '{key_status}'"
-            reasoning = f"The sole operational API key (ID: {key_id or 'N/A'}) is not active. Reason: {failure_reason or 'N/A'}. All LLM operations are blocked."
-        elif rate_limited_until:
-             # Ensure rate_limited_until is timezone-aware for comparison
+            problem_desc = f"CRITICAL: Operational API Key Status is '{key_status}' (DB ID: {key_id})"
+            reasoning = f"The sole operational API key (DB ID: {key_id}) is not active. Reason: {failure_reason or 'N/A'}. All LLM operations are blocked."
+        elif key_exists_in_db and rate_limited_until:
              if rate_limited_until.tzinfo is None:
                  rate_limited_until = rate_limited_until.replace(tzinfo=datetime.timezone.utc)
              if now_utc < rate_limited_until:
                 is_problem = True
-                problem_desc = f"CRITICAL: Operational API Key is Rate-Limited"
-                reasoning = f"The sole operational API key (ID: {key_id or 'N/A'}) is rate-limited until {rate_limited_until.isoformat()}. LLM operations blocked until then."
+                problem_desc = f"CRITICAL: Operational API Key is Rate-Limited (DB ID: {key_id})"
+                reasoning = f"The sole operational API key (DB ID: {key_id}) is rate-limited until {rate_limited_until.isoformat()}. LLM operations blocked until then."
 
         if is_problem:
             logger.critical(f"[MCOL Pre-Check] {problem_desc}. Reason: {reasoning}")
+            # MODIFIED: Signal proxy rotation as requested, even though it won't fix the key
+            signal_proxy_rotation()
+            logger.warning("[MCOL Pre-Check] Signaled proxy rotation due to critical API key issue (as requested).")
+
             strategy_desc = (
                 f"**CRITICAL ALERT:** Agency LLM function compromised due to API key issue.\n"
                 f"**Detected Status:** {key_status}\n"
                 f"**Rate Limited Until:** {rate_limited_until.isoformat() if rate_limited_until else 'N/A'}\n"
                 f"**Last Failure Reason:** {failure_reason or 'N/A'}\n"
+                f"**Proxy Rotation Triggered:** Yes (for subsequent web requests)\n" # Inform operator
                 f"**REQUIRED IMMEDIATE ACTION:**\n"
                 f"1. **INVESTIGATE:** Check OpenRouter dashboard for key status, usage, and billing.\n"
                 f"2. **REPLACE KEY:** If key is invalid/banned/missing, obtain a NEW key and update the `OPENROUTER_API_KEY` environment variable.\n"
-                f"3. **WAIT (if rate-limited):** If rate-limited, wait until the cooldown expires ({rate_limited_until.isoformat() if rate_limited_until else 'Unknown'}). Consider suggesting increased delays if this repeats (see other MCOL suggestions).\n"
+                f"3. **WAIT (if rate-limited):** If rate-limited, wait until the cooldown expires ({rate_limited_until.isoformat() if rate_limited_until else 'Unknown'}).\n"
                 f"4. **RESTART APPLICATION:** After changing the environment variable, restart the application service."
             )
             strategy = {
@@ -194,7 +200,7 @@ async def analyze_performance_and_prioritize(client: httpx.AsyncClient, kpi_data
     logger.info("[MCOL] Analyzing KPIs (excluding key status) with LLM...")
     try:
         llm_response = await call_llm_api(client, prompt, model="google/gemini-1.5-pro-latest") # Use a capable model
-    except (NoValidApiKeyError, APIKeyInvalidError) as key_err:
+    except (NoValidApiKeyError, APIKeyFailedError) as key_err:
          logger.error(f"[MCOL] Cannot analyze performance, API key issue detected: {key_err}")
          return None
     except Exception as e:
@@ -256,7 +262,6 @@ async def generate_solution_strategies(client: httpx.AsyncClient, problem: str, 
 
     # (Parsing logic remains the same)
     strategies = None
-    # ... (parsing logic as before) ...
     if llm_response:
         if isinstance(llm_response, list): strategies = llm_response
         elif isinstance(llm_response.get("strategies"), list): strategies = llm_response["strategies"]
