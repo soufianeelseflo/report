@@ -13,10 +13,11 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     # ports: # Do not expose DB publicly
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB} -q"] # Added -q for quiet
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 15s # IMPORTANT: Wait 15s before first health check
     restart: unless-stopped
 
   odr-service: # Keep ODR service
