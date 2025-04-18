@@ -3,7 +3,7 @@ version: '3.8'
 services:
   db:
     image: postgres:15-alpine
-    container_name: acumenis_prime_db # Renamed
+    container_name: acumenis_prime_db # Keep consistent name
     volumes:
       - postgres_data:/var/lib/postgresql/data
     environment:
@@ -11,8 +11,7 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-    # ports: # Do not expose DB publicly unless necessary
-    #   - "${POSTGRES_PORT:-5432}:5432"
+    # ports: # Do not expose DB publicly
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 10s
@@ -20,45 +19,43 @@ services:
       retries: 5
     restart: unless-stopped
 
-  odr-service: # New service for open-deep-research
+  odr-service: # Keep ODR service
     build:
       context: .
       dockerfile: Dockerfile # Uses the same Dockerfile base
-    container_name: acumenis_prime_odr # Renamed
+    container_name: acumenis_prime_odr # Keep consistent name
     working_dir: /app/open-deep-research-main
-    # Command to build and start the Next.js app
-    # Note: Building here might be slow; pre-building in Dockerfile is better if possible
     command: sh -c "npm install --omit=dev --legacy-peer-deps && npm run build && npm start -p 3000"
     restart: unless-stopped
     depends_on:
-      - db # ODR might not directly need DB, but good practice
+      - db
     environment:
       # Pass necessary API keys for ODR's operation (if it uses env vars)
-      GEMINI_API_KEY: ${GEMINI_API_KEY:-} # Example, adjust based on ODR needs
+      # Ensure OPENROUTER_API_KEY is passed if ODR needs it
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      # Add other keys ODR might need (Gemini, OpenAI etc. if configured in ODR)
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
-      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
       AZURE_SUB_KEY: ${AZURE_SUB_KEY:-}
       GOOGLE_SEARCH_API_KEY: ${GOOGLE_SEARCH_API_KEY:-}
       GOOGLE_SEARCH_CX: ${GOOGLE_SEARCH_CX:-}
       EXA_API_KEY: ${EXA_API_KEY:-}
-      # Ensure it listens on all interfaces inside the container
       HOST: '0.0.0.0'
       PORT: '3000'
-    # ports: # Only expose if needed externally, usually not for internal service
-    #   - "3000:3000"
+    # ports: # No need to expose internally
 
   app: # Main Acumenis FastAPI App
     build:
       context: .
       dockerfile: Dockerfile # Uses the same Dockerfile base
-    container_name: acumenis_prime_app # Renamed
+    container_name: acumenis_prime_app # Keep consistent name
     env_file:
       - .env # Load base .env if present
     environment:
-      # Override or set all required variables via Coolify secrets/env vars
-      POSTGRES_SERVER: db # Service name from docker-compose
+      # Core DB/Payment/Key Settings (MUST be set in Coolify)
+      POSTGRES_SERVER: db
       POSTGRES_PORT: 5432
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -68,25 +65,35 @@ services:
       LEMONSQUEEZY_VARIANT_STANDARD: ${LEMONSQUEEZY_VARIANT_STANDARD}
       LEMONSQUEEZY_VARIANT_PREMIUM: ${LEMONSQUEEZY_VARIANT_PREMIUM}
       LEMONSQUEEZY_WEBHOOK_SECRET: ${LEMONSQUEEZY_WEBHOOK_SECRET}
-      AGENCY_BASE_URL: ${AGENCY_BASE_URL} # CRITICAL: Set public URL
-      ENCRYPTION_KEY: ${ENCRYPTION_KEY} # CRITICAL: Set strong key
+      AGENCY_BASE_URL: ${AGENCY_BASE_URL} # CRITICAL
+      SECRET_KEY: ${SECRET_KEY} # CRITICAL
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY} # CRITICAL
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY} # CRITICAL (Single Key)
       LLM_PROVIDER: ${LLM_PROVIDER:-openrouter}
-      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-} # Fallback
-      PROXY_URL: ${PROXY_URL:-}
-      PROXY_LIST: ${PROXY_LIST:-} # Comma-separated if using list
-      KEY_ACQUIRER_RUN_ON_STARTUP: "True" # Force activation
-      # Add any other necessary env vars from config.py
-      # Point agents to the internal ODR service:
-      OPEN_DEEP_RESEARCH_SERVICE_URL: "http://odr-service:3000" # Agents will use this
+
+      # Proxy Settings (Read from .env via Coolify)
+      PROXY_ENABLED: ${PROXY_ENABLED:-True} # Default to True if not set
+      PROXY_HOST: ${PROXY_HOST}
+      PROXY_PORT: ${PROXY_PORT}
+      PROXY_USER: ${PROXY_USER}
+      PROXY_PASSWORD: ${PROXY_PASSWORD}
+      PROXY_LIST: ${PROXY_LIST:-} # Allow list override
+
+      # Other Settings (Can be overridden by Coolify)
+      EMAIL_SENDER_NAME: ${EMAIL_SENDER_NAME:-Acumenis AI}
+      MCOL_IMPLEMENTATION_MODE: ${MCOL_IMPLEMENTATION_MODE:-EXECUTE_SAFE_CONFIG}
+      OPEN_DEEP_RESEARCH_SERVICE_URL: "http://odr-service:3000" # Internal link
+
     depends_on:
       db:
         condition: service_healthy
-      odr-service: # Make app wait for ODR service (basic check, no healthcheck defined for ODR)
+      odr-service:
          condition: service_started
     ports:
       - "8000:8000" # Expose FastAPI app port
     restart: unless-stopped
-    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"] # Example with 4 workers
+    # Use multiple workers for higher throughput
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]
 
 volumes:
   postgres_data:

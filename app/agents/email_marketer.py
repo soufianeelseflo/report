@@ -12,6 +12,7 @@ from typing import Optional, Dict, Any, List, Tuple # Added Tuple
 
 import aiosmtplib
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select # Import select
 from tenacity import retry, stop_after_attempt, wait_fixed, retry_if_exception_type, wait_random_exponential # Added wait_random_exponential
 import httpx
 
@@ -21,12 +22,14 @@ try:
     from Acumenis.app.db import crud, models
     from Acumenis.app.agents.agent_utils import get_httpx_client, call_llm_api
     from Acumenis.app.core.security import decrypt_data
+    from Acumenis.app.db.base import get_worker_session # Import session getter
 except ImportError:
     print("[EmailMarketer] WARNING: Using fallback imports. Ensure package structure is correct for deployment.")
     from app.core.config import settings
     from app.db import crud, models
     from app.agents.agent_utils import get_httpx_client, call_llm_api
     from app.core.security import decrypt_data
+    from app.db.base import get_worker_session
 
 # Setup logger
 logger = logging.getLogger(__name__)
@@ -39,12 +42,12 @@ if not logger.hasHandlers():
     )
 
 # --- Configuration ---
-EMAIL_GENERATION_TIMEOUT = 180 # Increased timeout for complex prompts
-SMTP_TIMEOUT = 45 # Seconds for SMTP operations (increased slightly)
-SEND_DELAY_MIN = settings.EMAIL_SEND_DELAY_MIN # Loaded from config
-SEND_DELAY_MAX = settings.EMAIL_SEND_DELAY_MAX # Loaded from config
-WARMUP_THRESHOLD = settings.EMAIL_WARMUP_THRESHOLD
-WARMUP_DELAY_MULTIPLIER = settings.EMAIL_WARMUP_DELAY_MULTIPLIER
+EMAIL_GENERATION_TIMEOUT = 120 # Faster generation timeout
+SMTP_TIMEOUT = 30 # Seconds for SMTP operations (faster)
+SEND_DELAY_MIN = settings.EMAIL_SEND_DELAY_MIN # Use aggressive settings
+SEND_DELAY_MAX = settings.EMAIL_SEND_DELAY_MAX # Use aggressive settings
+# WARMUP_THRESHOLD = settings.EMAIL_WARMUP_THRESHOLD # REMOVED
+# WARMUP_DELAY_MULTIPLIER = settings.EMAIL_WARMUP_DELAY_MULTIPLIER # REMOVED
 EMAIL_MARKETER_SENDER_NAME = settings.EMAIL_SENDER_NAME # Use configured name
 
 # --- Email Content Generation ---
@@ -60,31 +63,30 @@ def extract_signal_context(source_string: Optional[str]) -> str:
     # Example: if source_string.startswith("manual_"): return "a specific opportunity identified for your company"
     return "a high-priority business signal identified by our AI" # Default fallback
 
-async def humanize_email_content(client: httpx.AsyncClient, subject: str, body: str) -> Optional[Dict[str, str]]:
-    """Uses LLM to rewrite email content to sound human and bypass AI detectors, while maintaining persuasive edge."""
-    # This prompt focuses on making it sound less like typical AI/marketing copy
+async def mutate_and_humanize_email_content(client: httpx.AsyncClient, subject: str, body: str) -> Optional[Dict[str, str]]:
+    """Uses LLM to rewrite email content to sound human AND aggressively evade filters."""
+    # NEW Prompt: Focus on mutation and evasion
     humanize_prompt = f"""
-    Rewrite the following hyper-personalized cold email subject and body.
-    Goal: Make it sound like an urgent, direct message from a busy but insightful human expert. Aggressively bypass AI detection filters. Emphasize exclusivity and speed.
-    Style: Extremely concise (under 80 words body), high-impact, slightly informal, confident, perhaps bordering on provocative. Use short sentences, maybe subtle natural-sounding typos or contractions if appropriate. Avoid corporate jargon, buzzwords, and overly enthusiastic language. Focus on immediate value/pain relief related to the signal.
-    Constraint: Retain the core value proposition (rapid AI reports for strategic advantage) and the direct call-to-action link placeholder '[Link to Order Page]'. Ensure the sender name placeholder '[Your Name]' is present at the end.
+    Rewrite and MUTATE the following hyper-personalized cold email subject and body.
+    Goal: Make it sound like an urgent, direct message from a busy human expert. AGGRESSIVELY bypass AI detection and spam filters. Emphasize exclusivity and speed. Use unconventional phrasing, synonyms, maybe subtle natural-sounding typos or contractions. Vary sentence structure significantly.
+    Constraint: Retain the core value proposition (rapid AI reports for strategic advantage) and the direct call-to-action link placeholder '[Link to Order Page]'. Ensure the sender name placeholder '[Your Name]' is present at the end. Keep body under 80 words.
 
     Original Subject: "{subject}"
     Original Body:
     "{body}"
 
     Output ONLY a JSON object with the rewritten "subject" and "body".
-    Example JSON:
+    Example JSON (focus on variation):
     {{
-      "subject": "Re: {{company_name}} - quick thought",
-      "body": "Hey [Name],\n\nSaw [signal context]. Looks like a blind spot.\n\nWe generate deep AI intel reports (competitors, market shifts, etc) in hours, not weeks. Solves [pain point].\n\nWorth $499 to act fast? [Link to Order Page]\n\nBest,\n[Your Name]"
+      "subject": "Quick thought re: {{company_name}} strategy",
+      "body": "Hey [Name] - saw the [signal context] stuff. Looks like a gap.\n\nWe spin up deep AI intel reports (competitors, market shifts etc) fast - hours, not weeks. Fixes the [pain point] issue.\n\nWorth $499 to move quicker? [Link to Order Page]\n\nCheers,\n[Your Name]"
     }}
     """
-    logger.info("[EmailMarketer] Humanizing/Sharpening email content with LLM...")
+    logger.info("[EmailMarketer] Mutating/Humanizing email content with LLM...")
     llm_response = await call_llm_api(
         client,
         humanize_prompt,
-        model=settings.PREMIUM_REPORT_MODEL or "google/gemini-1.5-pro-latest" # Use premium for better nuance
+        model=settings.PREMIUM_REPORT_MODEL # Use premium for better mutation/nuance
     )
 
     if llm_response and isinstance(llm_response, dict) and "subject" in llm_response and "body" in llm_response:
@@ -92,19 +94,19 @@ async def humanize_email_content(client: httpx.AsyncClient, subject: str, body: 
         h_body = llm_response["body"].strip()
         # Basic validation
         if h_subject and h_body and len(h_body) > 10 and '[Link to Order Page]' in h_body and '[Your Name]' in h_body:
-            logger.info(f"[EmailMarketer] Sharpened Subject: {h_subject}")
+            logger.info(f"[EmailMarketer] Mutated Subject: {h_subject}")
             return {"subject": h_subject, "body": h_body}
         else:
-             logger.warning(f"[EmailMarketer] Humanized content failed validation (missing placeholders or too short). Subject: {h_subject}, Body: {h_body[:100]}...")
+             logger.warning(f"[EmailMarketer] Mutated content failed validation (missing placeholders or too short). Subject: {h_subject}, Body: {h_body[:100]}...")
     else:
-        logger.warning(f"[EmailMarketer] Failed to get valid JSON structure from humanize LLM. Response: {llm_response}")
+        logger.warning(f"[EmailMarketer] Failed to get valid JSON structure from mutate LLM. Response: {llm_response}")
 
-    logger.warning("[EmailMarketer] Humanization/Sharpening failed, using initial draft.")
+    logger.warning("[EmailMarketer] Mutation/Humanization failed, using initial draft.")
     return None
 
 
 async def generate_personalized_email(client: httpx.AsyncClient, prospect: models.Prospect) -> Optional[Dict[str, str]]:
-    """Uses LLM to generate a hyper-personalized, aggressive subject and body, then humanizes/sharpens it."""
+    """Uses LLM to generate a hyper-personalized, aggressive subject and body, then mutates/humanizes it."""
     company_name = prospect.company_name
     pain_point = prospect.potential_pain_point or "closing critical gaps in strategic intelligence" # Make pain point more active
     signal_context = extract_signal_context(prospect.source)
@@ -112,8 +114,7 @@ async def generate_personalized_email(client: httpx.AsyncClient, prospect: model
     contact_first_name = (prospect.contact_name or "").split()[0] if prospect.contact_name else "there"
     greeting_name = contact_first_name if contact_first_name != "there" else company_name # Use company name if no contact name
 
-    # Step 1: Generate Initial Aggressive Draft
-    # Prompt focuses on directness, urgency, and clear value proposition tied to the signal.
+    # Step 1: Generate Initial Aggressive Draft (Keep this prompt aggressive)
     initial_prompt = f"""
     Objective: Generate an extremely concise, psychologically persuasive cold email subject and body for '{greeting_name}' at '{company_name}'. Goal is IMMEDIATE click-through and purchase ($499/$999).
     Your Role: Act as a 'rogue' AI strategist providing exclusive, time-sensitive intelligence based on a detected signal.
@@ -141,24 +142,20 @@ async def generate_personalized_email(client: httpx.AsyncClient, prospect: model
     initial_llm_response = await call_llm_api(
         client,
         initial_prompt,
-        model=settings.PREMIUM_REPORT_MODEL or "google/gemini-1.5-pro-latest" # Use premium for generation
+        model=settings.PREMIUM_REPORT_MODEL # Use premium for generation
     )
 
     initial_subject = None
     initial_body = None
     if initial_llm_response and isinstance(initial_llm_response, dict):
-        # Check for direct subject/body keys
         if "subject" in initial_llm_response and "body" in initial_llm_response:
             initial_subject = initial_llm_response["subject"].strip()
             initial_body = initial_llm_response["body"].strip()
-        # Check if the response itself might be the body (less likely with JSON prompt)
         elif isinstance(initial_llm_response.get("raw_inference"), str):
              raw = initial_llm_response["raw_inference"]
              try:
-                 # Try parsing raw inference as JSON again (sometimes models wrap output)
                  json_match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", raw, re.IGNORECASE | re.DOTALL)
                  json_str = json_match.group(1).strip() if json_match else raw.strip()
-                 # Handle potential leading/trailing text before/after JSON object
                  start_index = json_str.find('{')
                  end_index = json_str.rfind('}')
                  if start_index != -1 and end_index != -1:
@@ -166,14 +163,8 @@ async def generate_personalized_email(client: httpx.AsyncClient, prospect: model
                      parsed = json.loads(json_str)
                      initial_subject = parsed.get("subject","").strip()
                      initial_body = parsed.get("body","").strip()
-                 else: # Fallback if no clear JSON object found
+                 else:
                       logger.warning(f"[EmailMarketer] Could not extract JSON object from raw inference for {prospect.company_name}.")
-                      # Attempt simple regex as last resort if structure is very predictable
-                      # subject_match = re.search(r'"?subject"?\s*:\s*"(.*?)"', raw, re.IGNORECASE)
-                      # body_match = re.search(r'"?body"?\s*:\s*"([\s\S]*?)"', raw, re.IGNORECASE | re.DOTALL)
-                      # if subject_match: initial_subject = subject_match.group(1).strip()
-                      # if body_match: initial_body = body_match.group(1).strip().replace('\\n', '\n')
-
              except (json.JSONDecodeError, AttributeError, IndexError) as e:
                  logger.warning(f"[EmailMarketer] Failed to parse LLM raw inference as JSON for {prospect.company_name}. Error: {e}")
 
@@ -181,15 +172,15 @@ async def generate_personalized_email(client: httpx.AsyncClient, prospect: model
         logger.error(f"[EmailMarketer] Failed to generate valid initial draft for {prospect.company_name}. Missing subject, body, or placeholder. LLM Response: {initial_llm_response}")
         return None
 
-    # Step 2: Humanize/Sharpen the Draft (Optional but recommended)
-    humanized_content = await humanize_email_content(client, initial_subject, initial_body)
+    # Step 2: Mutate/Humanize the Draft
+    mutated_content = await mutate_and_humanize_email_content(client, initial_subject, initial_body)
 
-    final_content = humanized_content or {"subject": initial_subject, "body": initial_body}
+    final_content = mutated_content or {"subject": initial_subject, "body": initial_body}
 
     # Inject the order link and personalize placeholders
     order_link = f"{str(settings.AGENCY_BASE_URL).rstrip('/')}/order" # Ensure AGENCY_BASE_URL is correct
     final_content["body"] = final_content["body"].replace("[Link to Order Page]", order_link)
-    # Append link if placeholder somehow missing after humanization (safety net)
+    # Append link if placeholder somehow missing after mutation (safety net)
     if order_link not in final_content["body"]:
          final_content["body"] = final_content["body"].rstrip() + f"\n\nActivate here: {order_link}"
 
@@ -216,19 +207,17 @@ async def generate_personalized_email(client: httpx.AsyncClient, prospect: model
 # --- SMTP Sending Logic ---
 # Add retry logic to SMTP sending for transient network issues
 @retry(
-    stop=stop_after_attempt(3),
-    wait=wait_random_exponential(multiplier=1, max=10), # Exponential backoff up to 10s
+    stop=stop_after_attempt(2), # Fewer retries for faster failure
+    wait=wait_random_exponential(multiplier=0.5, max=5), # Faster backoff
     retry=retry_if_exception_type((aiosmtplib.SMTPServerDisconnected, aiosmtplib.SMTPConnectError, TimeoutError))
 )
 async def send_email_via_smtp(email_content: Dict[str, str], prospect_email: str, account: models.EmailAccount):
     """Connects to SMTP, authenticates, and sends the generated email using the account's ALIAS."""
     decrypted_password = decrypt_data(account.smtp_password_encrypted)
     if not decrypted_password:
-        # This is a critical configuration error, should not happen if validation is done on account add
         logger.error(f"CRITICAL: Password decryption failed for account {account.email_address} (ID: {account.account_id}).")
         raise ValueError(f"Password decryption failed for account {account.email_address}")
 
-    # Ensure alias_email exists (already checked by get_batch_of_active_accounts, but double-check)
     from_address = account.alias_email
     if not from_address:
         logger.error(f"CRITICAL: Account {account.email_address} (ID: {account.account_id}) has no alias_email. Cannot send.")
@@ -240,15 +229,14 @@ async def send_email_via_smtp(email_content: Dict[str, str], prospect_email: str
     msg['To'] = prospect_email
     msg['Date'] = formatdate(localtime=True)
     msg['Message-ID'] = make_msgid(domain=from_address.split('@')[-1])
-    # Consider adding List-Unsubscribe headers for compliance and deliverability
-    # unsubscribe_url = f"{str(settings.AGENCY_BASE_URL).rstrip('/')}/unsubscribe?email={prospect_email}&token=..." # Add a secure token
-    # msg['List-Unsubscribe'] = f'<{unsubscribe_url}>'
-    # msg['List-Unsubscribe-Post'] = 'List-Unsubscribe=One-Click'
+    # Add List-Unsubscribe headers for compliance and deliverability
+    unsubscribe_url = f"{str(settings.AGENCY_BASE_URL).rstrip('/')}/unsubscribe?email={prospect_email}" # Basic unsubscribe link
+    msg['List-Unsubscribe'] = f'<{unsubscribe_url}>'
+    msg['List-Unsubscribe-Post'] = 'List-Unsubscribe=One-Click'
     msg.set_content(email_content['body'])
 
     logger.info(f"[EmailMarketer] Attempting to send email to {prospect_email} via {account.smtp_user} (From: {from_address})...")
 
-    # Use STARTTLS for common ports like 587, direct TLS for 465
     use_tls_wrapper = account.smtp_port != 465
     use_starttls = account.smtp_port == 587
 
@@ -257,19 +245,17 @@ async def send_email_via_smtp(email_content: Dict[str, str], prospect_email: str
         smtp_client = aiosmtplib.SMTP(
             hostname=account.smtp_host,
             port=account.smtp_port,
-            use_tls=use_tls_wrapper, # Use TLS wrapper for non-465 ports
+            use_tls=use_tls_wrapper,
             timeout=SMTP_TIMEOUT
         )
         await smtp_client.connect()
         if use_starttls:
-            await smtp_client.starttls() # Explicit STARTTLS for port 587
+            await smtp_client.starttls()
 
         await smtp_client.login(account.smtp_user, decrypted_password)
-        # Send using the alias_email as the sender address in the SMTP transaction
         await smtp_client.send_message(msg, sender=from_address)
         logger.info(f"[EmailMarketer] Email sent successfully to {prospect_email} (From: {from_address})")
 
-    # Specific exception handling remains crucial here (as it determines account/prospect status)
     except aiosmtplib.SMTPAuthenticationError as e:
         logger.error(f"SMTP Auth Error for {account.email_address} (User: {account.smtp_user}). Error: {e}")
         raise # Re-raise specific error type for analysis
@@ -317,6 +303,7 @@ def analyze_smtp_error(error: Exception) -> Tuple[str, str]:
            "spam" in error_str or \
            "rate limit" in error_str or \
            "too many messages" in error_str or \
+           "policy violation" in error_str or \
            status_code in [421, 451, 550, 554] or \
            (status_code == 535 and "authentication failed" not in error_str): # 535 can be auth, but also other issues
             reason = f"Account Likely Suspended/Limited ({status_code or 'N/A'}): {error_str[:150]}"
@@ -337,7 +324,7 @@ def analyze_smtp_error(error: Exception) -> Tuple[str, str]:
 
 # --- Main Agent Logic ---
 async def process_email_batch(db: AsyncSession, shutdown_event: asyncio.Event):
-    """Fetches prospects, generates emails, and sends using a rotating pool of accounts."""
+    """Fetches prospects, generates emails, and sends using a rapidly rotating pool of accounts."""
     if shutdown_event.is_set(): return
 
     prospects_processed_count = 0
@@ -347,21 +334,25 @@ async def process_email_batch(db: AsyncSession, shutdown_event: asyncio.Event):
     client: Optional[httpx.AsyncClient] = None
     active_accounts: List[models.EmailAccount] = []
     account_index = -1 # Start before the first account
+    # Track usage *within this batch* to enforce rapid rotation (e.g., 1-3 emails per account)
+    batch_send_counts: Dict[int, int] = {}
+    MAX_SENDS_PER_ACCOUNT_PER_BATCH = 3 # Configurable: How many emails max per account in one go
 
     try:
         client = await get_httpx_client()
-        batch_account_limit = settings.EMAIL_ACCOUNTS_PER_BATCH or 10
-        active_accounts = await crud.get_batch_of_active_accounts(db, limit=batch_account_limit)
-        await db.commit() # Commit the transaction that potentially reset/locked accounts
+        # Fetch ALL active accounts for rotation potential
+        batch_account_limit = 100 # Fetch a large pool
+        stmt = select(models.EmailAccount).where(models.EmailAccount.is_active == True).where(models.EmailAccount.alias_email.isnot(None)).limit(batch_account_limit)
+        result = await db.execute(stmt)
+        active_accounts = list(result.scalars().all()) # Convert to list
 
         if not active_accounts:
             logger.warning("[EmailMarketer] No active email accounts with valid aliases found in DB. Cannot send emails this cycle.")
             return
         logger.info(f"[EmailMarketer] Fetched {len(active_accounts)} active accounts for this batch.")
-        # Shuffle accounts to vary usage patterns slightly
-        random.shuffle(active_accounts)
+        random.shuffle(active_accounts) # Shuffle for randomness
 
-        batch_prospect_limit = settings.EMAIL_BATCH_SIZE or 100
+        batch_prospect_limit = settings.EMAIL_BATCH_SIZE # Use configured batch size (e.g., 50)
         prospects = await crud.get_new_prospects_for_emailing(db, limit=batch_prospect_limit)
         await db.commit() # Commit the transaction locking prospects
 
@@ -383,40 +374,44 @@ async def process_email_batch(db: AsyncSession, shutdown_event: asyncio.Event):
             current_account_list_index = -1 # Track index in the current batch list
 
             try:
-                # --- Select Account with Rotation & Check Limits ---
+                # --- Select Account with RAPID Rotation & Check Limits ---
                 if not active_accounts:
                     logger.warning("[EmailMarketer] Ran out of usable accounts for this batch.")
                     break # Stop processing this batch of prospects
 
                 # Find the next usable account in the shuffled list
                 account_found = False
+                start_search_index = (account_index + 1) % len(active_accounts)
                 for i in range(len(active_accounts)):
-                    account_index = (account_index + 1) % len(active_accounts)
-                    potential_account = active_accounts[account_index]
-                    # Double check daily limit in memory (might have been incremented in this loop)
-                    if potential_account.emails_sent_today < potential_account.daily_limit:
-                        email_account = potential_account
-                        current_account_list_index = account_index
-                        account_found = True
-                        break
+                    check_index = (start_search_index + i) % len(active_accounts)
+                    potential_account = active_accounts[check_index]
+                    account_id = potential_account.account_id
+                    # Check batch usage limit first
+                    if batch_send_counts.get(account_id, 0) < MAX_SENDS_PER_ACCOUNT_PER_BATCH:
+                        # Then check daily limit (though less relevant with rapid rotation)
+                        if potential_account.emails_sent_today < potential_account.daily_limit:
+                            email_account = potential_account
+                            current_account_list_index = check_index
+                            account_index = check_index # Update main index
+                            account_found = True
+                            break
+                        else:
+                             logger.debug(f"Account {account_id} skipped (daily limit reached).")
                     else:
-                        logger.debug(f"Account {potential_account.account_id} skipped (limit reached in this batch).")
+                         logger.debug(f"Account {account_id} skipped (batch limit {MAX_SENDS_PER_ACCOUNT_PER_BATCH} reached).")
+
 
                 if not account_found:
-                    logger.warning("[EmailMarketer] All available accounts reached their limit within this batch.")
+                    logger.warning("[EmailMarketer] All available accounts reached their batch/daily limit.")
                     break # Stop processing prospects for this batch
 
-                # --- Delays ---
-                base_delay = random.uniform(SEND_DELAY_MIN, SEND_DELAY_MAX)
-                warmup_factor = 1.0
-                if email_account.emails_sent_today < WARMUP_THRESHOLD:
-                    # Apply multiplier more significantly for very low send counts
-                    warmup_factor = WARMUP_DELAY_MULTIPLIER + (WARMUP_THRESHOLD - email_account.emails_sent_today) * 0.1
-                total_delay = base_delay * warmup_factor
-                logger.debug(f"Sleeping for {total_delay:.2f}s before sending (Account: {email_account.account_id}, Sent Today: {email_account.emails_sent_today})")
+                # --- Delays (Minimal) ---
+                # REMOVED WARMUP LOGIC
+                total_delay = random.uniform(SEND_DELAY_MIN, SEND_DELAY_MAX) # Use aggressive base delay only
+                logger.debug(f"Sleeping for {total_delay:.2f}s before sending (Account: {email_account.account_id})")
                 await asyncio.sleep(total_delay)
 
-                # --- Generate Email ---
+                # --- Generate Email (with Mutation) ---
                 email_content = await generate_personalized_email(client, prospect)
                 if not email_content:
                     logger.warning(f"[EmailMarketer] Skipping prospect {prospect.prospect_id} ({prospect.company_name}) due to email generation failure.")
@@ -432,13 +427,15 @@ async def process_email_batch(db: AsyncSession, shutdown_event: asyncio.Event):
                 prospect_status_update = ("CONTACTED", datetime.datetime.now(datetime.timezone.utc))
                 increment_send_count_for_account_id = email_account.account_id
                 prospects_emailed_count += 1
-                # Increment in-memory count for immediate check in next loop iteration
+                # Increment in-memory counts for immediate check in next loop iteration
                 email_account.emails_sent_today += 1
+                batch_send_counts[email_account.account_id] = batch_send_counts.get(email_account.account_id, 0) + 1
+
 
             except Exception as e:
-                # --- Enhanced Error Handling ---
+                # --- Enhanced Error Handling (Keep this logic) ---
                 error_type, reason = analyze_smtp_error(e)
-                logger.error(f"[EmailMarketer] Error processing prospect {prospect.prospect_id} ({prospect.company_name}) with account {email_account.email_address if email_account else 'N/A'}. Type: {error_type}, Reason: {reason}", exc_info=(error_type == "UNKNOWN_ERROR")) # Full trace only for unknowns
+                logger.error(f"[EmailMarketer] Error processing prospect {prospect.prospect_id} ({prospect.company_name}) with account {email_account.email_address if email_account else 'N/A'}. Type: {error_type}, Reason: {reason}", exc_info=(error_type == "UNKNOWN_ERROR"))
 
                 prospects_failed_count += 1 # Count any failure as a prospect failure for this attempt
 
@@ -447,6 +444,7 @@ async def process_email_batch(db: AsyncSession, shutdown_event: asyncio.Event):
                     if email_account: # Still count as a send attempt for the account
                         increment_send_count_for_account_id = email_account.account_id
                         email_account.emails_sent_today += 1
+                        batch_send_counts[email_account.account_id] = batch_send_counts.get(email_account.account_id, 0) + 1
                 elif error_type == "ACCOUNT_ISSUE":
                     if email_account:
                         account_to_deactivate = (email_account.account_id, reason)
@@ -468,17 +466,19 @@ async def process_email_batch(db: AsyncSession, shutdown_event: asyncio.Event):
                 elif error_type == "TRANSIENT_ERROR":
                     # Don't update prospect status, don't deactivate account. Let retry handle it or fail later.
                     prospect_status_update = None
-                    # Optionally increment account send count here? Debatable. Let's not count transient errors as sends.
+                    # Don't count transient errors as sends or batch usage
                 else: # UNKNOWN_ERROR or other unexpected issues
                     prospect_status_update = ("FAILED_SEND", None) # Mark prospect as failed send
                     if email_account: # Still count as attempt
                         increment_send_count_for_account_id = email_account.account_id
                         email_account.emails_sent_today += 1
+                        batch_send_counts[email_account.account_id] = batch_send_counts.get(email_account.account_id, 0) + 1
 
             finally:
-                # --- Database Updates (within prospect loop) ---
+                # --- Database Updates (within prospect loop - Keep this logic) ---
                 prospect_session: AsyncSession = None
                 try:
+                    # Use get_worker_session for isolated transaction per prospect
                     prospect_session = await get_worker_session()
                     if account_to_deactivate:
                         await crud.set_email_account_inactive(prospect_session, account_to_deactivate[0], account_to_deactivate[1])
@@ -496,7 +496,7 @@ async def process_email_batch(db: AsyncSession, shutdown_event: asyncio.Event):
     except Exception as e:
         logger.error(f"[EmailMarketer] Unhandled error in email processing batch: {e}", exc_info=True)
         # Rollback potentially pending transaction from account/prospect fetching if error happened before loop
-        # This requires careful session management - ensure sessions are closed properly.
+        if db: await db.rollback() # Rollback the main session if it was used for fetching
     finally:
         if client: await client.aclose()
 

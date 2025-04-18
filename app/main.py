@@ -25,9 +25,12 @@ try:
     )
     from app.db import models, crud # Import crud
     from app.api import schemas # Import base schemas
+    # MODIFIED: Removed KeyAcquirer imports, kept agent_utils imports
     from app.agents.agent_utils import (
-        load_and_update_api_keys, start_key_refresh_task, _key_refresh_task,
-        AVAILABLE_API_KEYS, _keys_loaded, shutdown_event # Import shared shutdown_event
+        # load_and_update_api_keys, # REMOVED - No DB keys to load
+        # start_key_refresh_task, _key_refresh_task, # REMOVED - No refresh task
+        # AVAILABLE_API_KEYS, _keys_loaded, # REMOVED - Using single key
+        shutdown_event # Import shared shutdown_event
     )
 except ImportError as e:
     print(f"[MainApp] CRITICAL IMPORT ERROR: {e}. Check PYTHONPATH or package structure.")
@@ -39,8 +42,10 @@ except ImportError as e:
         from Acumenis.app.db import models, crud
         from Acumenis.app.api import schemas
         from Acumenis.app.agents.agent_utils import (
-            load_and_update_api_keys, start_key_refresh_task, _key_refresh_task,
-            AVAILABLE_API_KEYS, _keys_loaded, shutdown_event
+            # load_and_update_api_keys, # REMOVED
+            # start_key_refresh_task, _key_refresh_task, # REMOVED
+            # AVAILABLE_API_KEYS, _keys_loaded, # REMOVED
+            shutdown_event
         )
         print("[MainApp] WARNING: Using Acumenis fallback imports.")
     except ImportError:
@@ -157,12 +162,13 @@ def _import_runners():
     """Dynamically imports worker runner functions and populates WORKER_RUNNERS."""
     global WORKER_RUNNERS
     runners = {}
+    # MODIFIED: Removed KeyAcquirer from the list
     worker_modules = [
         ("report_generator", "Acumenis.app.workers.run_report_worker", "run_report_generator_worker"),
         ("prospect_researcher", "Acumenis.app.workers.run_research_worker", "run_prospect_researcher_worker"),
         ("email_marketer", "Acumenis.app.workers.run_email_worker", "run_email_marketer_worker"),
         ("mcol", "Acumenis.app.workers.run_mcol_worker", "run_mcol_worker"),
-        ("key_acquirer", "Acumenis.app.workers.run_key_acquirer_worker", "run_key_acquirer_worker"),
+        # ("key_acquirer", "Acumenis.app.workers.run_key_acquirer_worker", "run_key_acquirer_worker"), # REMOVED
     ]
     # Fallback path if primary fails
     fallback_worker_modules = [
@@ -170,7 +176,7 @@ def _import_runners():
         ("prospect_researcher", "app.workers.run_research_worker", "run_prospect_researcher_worker"),
         ("email_marketer", "app.workers.run_email_worker", "run_email_marketer_worker"),
         ("mcol", "app.workers.run_mcol_worker", "run_mcol_worker"),
-        ("key_acquirer", "app.workers.run_key_acquirer_worker", "run_key_acquirer_worker"),
+        # ("key_acquirer", "app.workers.run_key_acquirer_worker", "run_key_acquirer_worker"), # REMOVED
     ]
 
     import importlib
@@ -237,9 +243,10 @@ def _worker_task_done_callback(worker_name: str, task: asyncio.Task):
 
 
 async def stop_all_workers():
-     """Internal function to signal workers and key refresh to stop."""
+     """Internal function to signal workers to stop."""
+     # MODIFIED: Removed key refresh task stop
      if not shutdown_event.is_set():
-        logger.info("Signaling all workers and key refresh task to stop via shared shutdown_event...")
+        logger.info("Signaling all workers to stop via shared shutdown_event...")
         shutdown_event.set()
         await asyncio.sleep(0.1) # Give event loop a chance to propagate signal
         logger.info("Shutdown signal sent.")
@@ -259,7 +266,6 @@ async def get_worker_status_internal() -> Dict[str, str]:
                 except asyncio.CancelledError:
                     status_info[name] = "Stopped (Cancelled)"
                 except asyncio.InvalidStateError:
-                     # This means exception() was called before task was done, should not happen here
                      status_info[name] = "Unknown (Task Done, Invalid State)"
             else:
                 status_info[name] = "Running"
@@ -285,6 +291,7 @@ async def get_control_panel(request: Request):
     # Prepare data for the template (ensure all known workers are listed)
     template_data = {
         "request": request,
+        # MODIFIED: Filter workers based on WORKER_RUNNERS keys
         "workers": [{"name": name, "status": worker_status_info.get(name, "Unknown")} for name in WORKER_RUNNERS.keys()]
     }
     return templates.TemplateResponse("control_panel.html", template_data)
@@ -337,17 +344,17 @@ async def health_check(db: AsyncSession = Depends(get_db_session)): # Use manage
          logger.error(f"Health check DB connection failed: {e}", exc_info=False) # Keep log less verbose
          db_status = "DB Error"
 
+    # MODIFIED: Check if the single API key is configured
     key_status = "OK"
-    if not _keys_loaded:
-        key_status = "Keys Not Initialized"
-    elif not AVAILABLE_API_KEYS:
-        key_status = "No Keys Loaded"
+    if not settings.OPENROUTER_API_KEY:
+        key_status = "API Key Missing"
+        logger.warning("Health Check: OPENROUTER_API_KEY is not configured.")
 
-    overall_status = "OK" if db_status == "OK" and key_status == "OK" else "WARN"
+    overall_status = "OK" if db_status == "OK" and key_status == "OK" else "ERROR" if key_status == "API Key Missing" else "WARN"
 
     return schemas.HealthCheck(
         name=settings.PROJECT_NAME,
-        status=f"API: {overall_status}, DB: {db_status}, Keys: {key_status}",
+        status=f"API: {overall_status}, DB: {db_status}, Key: {key_status}",
         version=settings.VERSION
     )
 
@@ -382,42 +389,27 @@ async def startup_event():
     # 1. Verify Database Connection
     if not await check_db_connection():
         logger.critical("Startup halted due to database connection failure.")
-        # Consider raising SystemExit here to prevent container from staying up
         raise SystemExit("Database connection failed on startup")
 
     # 2. Import Worker Runners
     logger.info("Importing worker runners...")
-    _import_runners()
+    _import_runners() # This now excludes KeyAcquirer runner
 
-    # 3. Load API Keys
-    logger.info("Initial loading of API keys...")
-    await load_and_update_api_keys()
-    if not _keys_loaded:
-         logger.error("API key load flag not set after load attempt. Check agent_utils.")
-    elif not AVAILABLE_API_KEYS:
-         logger.warning("No active API keys found during initial load. LLM calls will fail unless keys are added manually.")
+    # 3. Verify Single API Key Presence
+    logger.info("Verifying API key configuration...")
+    if not settings.OPENROUTER_API_KEY:
+         logger.critical("FATAL: OPENROUTER_API_KEY is not set in environment. LLM calls will fail.")
+         # Consider stopping startup if key is essential
+         raise SystemExit("Missing required OPENROUTER_API_KEY")
     else:
-         logger.info(f"Successfully loaded {len(AVAILABLE_API_KEYS)} API keys initially.")
+         logger.info(f"Single API key found (...{settings.OPENROUTER_API_KEY[-4:]}).")
 
-    # 4. Start Background Key Refresh Task
-    logger.info("Starting background API key refresh task...")
-    start_key_refresh_task()
+    # 4. Start Background Key Refresh Task - REMOVED
 
-    # 5. Conditionally Start KeyAcquirer (if enabled in config)
-    if settings.KEY_ACQUIRER_RUN_ON_STARTUP:
-        if "key_acquirer" in WORKER_RUNNERS:
-            logger.info("KEY_ACQUIRER_RUN_ON_STARTUP is True. Checking initial key count...")
-            if len(AVAILABLE_API_KEYS) < settings.KEY_ACQUIRER_TARGET_COUNT:
-                logger.info(f"Key count ({len(AVAILABLE_API_KEYS)}) is below target ({settings.KEY_ACQUIRER_TARGET_COUNT}). Starting Key Acquirer worker...")
-                await _start_worker_task("key_acquirer")
-            else:
-                logger.info(f"Sufficient keys ({len(AVAILABLE_API_KEYS)}) already available. Key Acquirer will not start automatically.")
-        else:
-            logger.error("KEY_ACQUIRER_RUN_ON_STARTUP is True, but Key Acquirer runner function not found.")
-    else:
-        logger.info("KEY_ACQUIRER_RUN_ON_STARTUP is False. Key Acquirer will not start automatically.")
+    # 5. Conditionally Start KeyAcquirer - REMOVED
 
     # 6. Start Core Workers Automatically
+    # MODIFIED: Removed key_acquirer from core_workers list
     core_workers = ["report_generator", "prospect_researcher", "email_marketer", "mcol"]
     logger.info(f"Starting core workers: {', '.join(core_workers)}...")
     start_results = await asyncio.gather(*[_start_worker_task(name) for name in core_workers if name in WORKER_RUNNERS])
@@ -429,7 +421,7 @@ async def startup_event():
     logger.info(f"Access API at {settings.AGENCY_BASE_URL}{settings.API_V1_STR}")
     if STATIC_DIR: logger.info(f"Access Frontend at {settings.AGENCY_BASE_URL}/")
     if templates: logger.info(f"Access Control Panel at {settings.AGENCY_BASE_URL}/ui")
-    logger.warning("Acumenis Prime Operational. Victory Mandate Engaged.")
+    logger.warning("Acumenis Prime Operational. Velocity Protocol Engaged.")
 
 
 @app.on_event("shutdown")
@@ -437,19 +429,7 @@ async def shutdown_app_event():
     logger.info(f"--- {settings.PROJECT_NAME} Shutdown Sequence Initiated ---")
     await stop_all_workers() # Signal shared event first
 
-    # Cancel the key refresh task
-    global _key_refresh_task
-    if _key_refresh_task and not _key_refresh_task.done():
-        logger.info("Cancelling background key refresh task...")
-        _key_refresh_task.cancel()
-        try:
-            await asyncio.wait_for(_key_refresh_task, timeout=5.0) # Wait briefly for cancellation
-        except asyncio.CancelledError:
-            logger.info("Key refresh task successfully cancelled.")
-        except asyncio.TimeoutError:
-             logger.warning("Key refresh task did not cancel within timeout.")
-        except Exception as e:
-            logger.error(f"Error during key refresh task cancellation: {e}", exc_info=True)
+    # Cancel the key refresh task - REMOVED
 
     # Wait for worker tasks with timeout
     tasks_to_await = [task for task in worker_tasks.values() if task and not task.done()]
@@ -489,7 +469,7 @@ if __name__ == "__main__":
         port=8000,
         log_level="info",
         reload=False, # Never use reload in production
-        workers=int(os.getenv("WEB_CONCURRENCY", 1)), # Default to 1 if not set
+        workers=int(os.getenv("WEB_CONCURRENCY", 4)), # Default to 4 workers for speed
         loop="uvloop" if "uvloop" in globals() else "asyncio", # Use uvloop if available
         http="httptools" if "httptools" in globals() else "auto", # Use httptools if available
         # Add proxy headers if running behind a reverse proxy like Nginx/Traefik

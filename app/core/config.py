@@ -11,10 +11,10 @@ logger = logging.getLogger(__name__)
 class Settings(BaseSettings):
     PROJECT_NAME: str = "Acumenis AI Agency"
     API_V1_STR: str = "/api/v1"
-    VERSION: str = "3.0.1-Prime" # Version tracking
+    VERSION: str = "3.1-Velocity" # Version tracking
 
     # --- Security ---
-    SECRET_KEY: str = Field(default="a_very_secret_key_change_this_in_production_32_chars_min", min_length=32) # Used for signing, etc. MUST be strong and long
+    SECRET_KEY: str = Field(default="change_this_in_production_a_very_secret_key_32_chars_min", min_length=32) # Used for signing, etc. MUST be strong and long
     ENCRYPTION_KEY: str # MUST be set via env (32 url-safe base64-encoded bytes)
 
     @validator('ENCRYPTION_KEY')
@@ -82,69 +82,59 @@ class Settings(BaseSettings):
     DB_ECHO: bool = False # Set to True for debugging SQL queries
 
     # --- Agency & Web Presence ---
-    AGENCY_BASE_URL: AnyHttpUrl = Field(default="http://localhost:8000", description="Public base URL (MUST include http/https)") # !! MUST BE SET IN .ENV/COOLIFY FOR PRODUCTION !!
-    EMAIL_SENDER_NAME: str = "Acumenis AI Strategist" # Name used in email signatures
+    AGENCY_BASE_URL: AnyHttpUrl = Field(..., description="Public base URL (MUST include http/https)") # !! MUST BE SET IN .ENV !!
 
     # --- Payment (Lemon Squeezy) ---
-    LEMONSQUEEZY_API_KEY: Optional[str] = None
-    LEMONSQUEEZY_STORE_ID: Optional[str] = None
-    LEMONSQUEEZY_VARIANT_STANDARD: Optional[str] = None # e.g., 12345
-    LEMONSQUEEZY_VARIANT_PREMIUM: Optional[str] = None # e.g., 67890
-    LEMONSQUEEZY_WEBHOOK_SECRET: Optional[str] = None # CRITICAL for security
+    LEMONSQUEEZY_API_KEY: str # Changed to required
+    LEMONSQUEEZY_STORE_ID: str # Changed to required
+    LEMONSQUEEZY_VARIANT_STANDARD: str # Changed to required
+    LEMONSQUEEZY_VARIANT_PREMIUM: str # Changed to required
+    LEMONSQUEEZY_WEBHOOK_SECRET: str # Changed to required
 
     # --- LLM Provider Configuration ---
-    LLM_PROVIDER: str = "openrouter" # Currently only 'openrouter' fully supported in agent_utils
-    OPENROUTER_API_KEY: Optional[str] = None # Fallback if DB is empty
-    HTTP_REFERER: Optional[str] = None # Set automatically from AGENCY_BASE_URL below if None
-    X_TITLE: Optional[str] = None # Set automatically from PROJECT_NAME below if None
+    LLM_PROVIDER: str = "openrouter" # Keep as only supported option for now
+    OPENROUTER_API_KEY: str # Changed to required - The single key
+    # HTTP_REFERER: Optional[str] = None # REMOVED - Use AGENCY_BASE_URL
+    # X_TITLE: Optional[str] = None # REMOVED - Use PROJECT_NAME
     STANDARD_REPORT_MODEL: str = "google/gemini-1.5-flash-latest" # Default model for standard reports/tasks
     PREMIUM_REPORT_MODEL: str = "google/gemini-1.5-pro-latest" # Default model for premium reports/tasks
-    RATE_LIMIT_COOLDOWN_SECONDS: int = 120 # How long to sideline a key after a 429 error (increased default)
-    API_KEY_LOW_THRESHOLD: int = 5 # MCOL warns below this number of active keys
-
-    @validator('HTTP_REFERER', pre=True, always=True)
-    def set_http_referer(cls, v, values):
-        return v or str(values.get('AGENCY_BASE_URL'))
-
-    @validator('X_TITLE', pre=True, always=True)
-    def set_x_title(cls, v, values):
-        return v or values.get('PROJECT_NAME')
+    RATE_LIMIT_COOLDOWN_SECONDS: int = 60 # Shorter cooldown, assume manual fix
+    API_KEY_LOW_THRESHOLD: int = 1 # MCOL warns if the single key fails (effectively count < 1)
 
     # --- External Tools & Internal Services ---
     OPEN_DEEP_RESEARCH_SERVICE_URL: AnyHttpUrl = Field(default="http://odr-service:3000", description="Internal ODR service URL")
-    INTERNAL_ODR_API_KEY: Optional[str] = Field(None, description="Optional API key for securing internal ODR calls")
+    # INTERNAL_ODR_API_KEY: Optional[str] = Field(None, description="Optional API key for securing internal ODR calls") # REMOVED - Simplify
 
-    # --- Proxies (Essential for KeyAcquirer if enabled) ---
-    PROXY_URL: Optional[str] = Field(None, description="Single Proxy URL (e.g., http://user:pass@host:port)")
-    PROXY_LIST: Optional[List[str]] = Field(None, description="List of Proxy URLs (overrides PROXY_URL)")
+    # --- Proxies ---
+    PROXY_ENABLED: bool = False # Default to False if not set
+    PROXY_HOST: Optional[str] = None
+    PROXY_PORT: Optional[int] = None
+    PROXY_USER: Optional[str] = None
+    PROXY_PASSWORD: Optional[str] = None
+    PROXY_LIST: Optional[List[str]] = Field(None, description="List of Proxy URLs (overrides single proxy if set)") # Keep list option
 
     @validator('PROXY_LIST', pre=True)
     def process_proxy_list(cls, v):
         if isinstance(v, str):
-            return [p.strip() for p in v.split(',') if p.strip()]
+            # Ensure format user:pass@host:port
+            valid_proxies = []
+            for p in v.split(','):
+                p_strip = p.strip()
+                if re.match(r"^(http|https|socks\d?)://.*:.*@.*:\d+", p_strip):
+                    valid_proxies.append(p_strip)
+                else:
+                    logger.warning(f"Invalid proxy format in PROXY_LIST skipped: {p_strip}")
+            return valid_proxies
         return v
 
-    # --- Key Acquirer Configuration (High Risk - Default OFF) ---
-    KEY_ACQUIRER_RUN_ON_STARTUP: bool = False # Default to False for safety
-    KEY_ACQUIRER_TARGET_COUNT: int = 10 # How many active keys to aim for
-    KEY_ACQUIRER_CONCURRENCY: int = 2 # Reduced default concurrency
-    KEY_ACQUIRER_MAX_FAILURES: int = 5 # Stop worker after this many consecutive failures
-    TEMP_EMAIL_PROVIDER_URL: str = "https://inboxes.com/"
-    OPENROUTER_SIGNUP_URL: str = "https://openrouter.ai/auth?callbackUrl=%2Fkeys"
-    OPENROUTER_KEYS_URL: str = "https://openrouter.ai/keys"
-    TEMP_EMAIL_SELECTOR: str = "#email"
-    SIGNUP_EMAIL_FIELD_NAME: str = "email"
-    SIGNUP_PASSWORD_FIELD_NAME: str = "password"
-    SIGNUP_SUBMIT_SELECTOR: str = "button[type='submit']"
-    API_KEY_DISPLAY_SELECTOR: str = "input[readonly][value^='sk-or-']"
-    CAPTCHA_IMAGE_SELECTOR: str = 'img[alt="CAPTCHA"], iframe[title*="CAPTCHA"], div.captcha-image img' # Example
-    CAPTCHA_INPUT_SELECTOR: str = 'input[name*="captcha"], input[id*="captcha"]' # Example
+    # --- Key Acquirer Configuration ---
+    # REMOVED ALL KEY_ACQUIRER_* variables
 
     # --- Prospecting & Marketing Configuration ---
-    MAX_PROSPECTS_PER_CYCLE: int = 25 # Increased slightly
-    ODR_FOR_PROSPECT_DETAILS: bool = True # Enable deeper ODR search per prospect by default
-    ODR_DETAIL_DEPTH: int = 2 # Depth for detailed ODR search
-    PROSPECTING_QUERIES: List[str] = [ # Default queries if not overridden
+    MAX_PROSPECTS_PER_CYCLE: int = 50 # Increased prospecting volume
+    ODR_FOR_PROSPECT_DETAILS: bool = True # Keep detailed ODR search
+    ODR_DETAIL_DEPTH: int = 1 # Reduce depth slightly for speed/cost
+    PROSPECTING_QUERIES: List[str] = [ # Keep defaults, user can override in .env
         "List B2B SaaS companies in marketing technology that received Series A funding recently",
         "Identify companies launching new AI-powered analytics products",
         "Find e-commerce platforms expanding into international markets",
@@ -153,25 +143,32 @@ class Settings(BaseSettings):
         "Fintech startups developing blockchain-based payment solutions",
         "Renewable energy companies securing new large-scale projects",
     ]
-    EMAIL_VALIDATION_ENABLED: bool = False # Set to True to enable external validation (Requires API URL/Key)
-    EMAIL_VALIDATION_API_URL: Optional[AnyHttpUrl] = Field(None, description="URL of the external email validation service")
-    EMAIL_VALIDATION_API_KEY: Optional[str] = None # API key if required by the service
-    EMAIL_SEND_DELAY_MIN: float = 2.0 # Increased min delay
-    EMAIL_SEND_DELAY_MAX: float = 7.0 # Increased max delay
-    EMAIL_WARMUP_THRESHOLD: int = 7 # Slightly increased warmup threshold
-    EMAIL_WARMUP_DELAY_MULTIPLIER: float = 1.8 # Increased warmup multiplier
+    EMAIL_VALIDATION_ENABLED: bool = False # Keep disabled unless user explicitly configures API
+    EMAIL_VALIDATION_API_URL: Optional[AnyHttpUrl] = None
+    EMAIL_VALIDATION_API_KEY: Optional[str] = None
+    EMAIL_SEND_DELAY_MIN: float = 0.5 # Drastically reduced min delay
+    EMAIL_SEND_DELAY_MAX: float = 2.0 # Drastically reduced max delay
+    EMAIL_WARMUP_THRESHOLD: int = 0 # No warmup
+    EMAIL_WARMUP_DELAY_MULTIPLIER: float = 1.0 # No warmup multiplier
 
     # --- Agent Worker Configuration ---
-    REPORT_GENERATOR_INTERVAL_SECONDS: int = 5 # Check frequently for new tasks
-    REPORT_GENERATOR_TIMEOUT_SECONDS: int = 720 # Timeout for the ODR service call
-    PROSPECT_RESEARCHER_INTERVAL_SECONDS: int = 3600 # Run hourly
-    EMAIL_MARKETER_INTERVAL_SECONDS: int = 15 # Check frequently for prospects
-    EMAIL_BATCH_SIZE: int = 15 # Number of prospects to fetch per cycle
-    EMAIL_ACCOUNTS_PER_BATCH: int = 8 # Number of email accounts to load per cycle
-    MCOL_ANALYSIS_INTERVAL_SECONDS: int = 300 # Analyze every 5 mins
-    MCOL_IMPLEMENTATION_MODE: str = "SUGGEST" # SUGGEST | EXECUTE_SAFE_CONFIG | EXECUTE_PROMPT_TUNING | EXECUTE_CODE (Risky!) - Default SUGGEST
-    MCOL_PROMPT_TUNING_ENABLED: bool = False # Disable LLM prompt tuning by MCOL by default
-    MCOL_MAX_STRATEGIES: int = 3 # Max strategies MCOL should generate per cycle
+    REPORT_GENERATOR_INTERVAL_SECONDS: int = 2 # Check very frequently
+    REPORT_GENERATOR_TIMEOUT_SECONDS: int = 600 # Keep timeout reasonable
+    PROSPECT_RESEARCHER_INTERVAL_SECONDS: int = 1800 # Run every 30 mins
+    EMAIL_MARKETER_INTERVAL_SECONDS: int = 5 # Check very frequently
+    EMAIL_BATCH_SIZE: int = 50 # Fetch larger batches for mass email
+    EMAIL_ACCOUNTS_PER_BATCH: int = 20 # Load more accounts if available
+    MCOL_ANALYSIS_INTERVAL_SECONDS: int = 120 # Analyze every 2 mins
+    MCOL_IMPLEMENTATION_MODE: str = "EXECUTE_SAFE_CONFIG" # Default to execution
+    MCOL_PROMPT_TUNING_ENABLED: bool = False # Keep disabled
+    MCOL_MAX_STRATEGIES: int = 1 # Focus on executing one thing fast
+
+    # --- Email Account Credentials (Reference - Add to DB manually) ---
+    # EMAIL_USERNAME: Optional[str] = None
+    # EMAIL_PASSWORD: Optional[str] = None
+    # EMAIL_SMTP_HOST: Optional[str] = None
+    # EMAIL_SMTP_PORT: Optional[int] = None
+    EMAIL_SENDER_NAME: str = "Acumenis AI Strategist" # Default sender name
 
     class Config:
         env_file = ".env"
@@ -182,11 +179,17 @@ class Settings(BaseSettings):
 # Instantiate settings
 try:
     settings = Settings()
-    # Post-validation checks
+    # Post-validation checks (optional)
     if not settings.LEMONSQUEEZY_WEBHOOK_SECRET:
          logger.warning("LEMONSQUEEZY_WEBHOOK_SECRET is not set. Webhook verification will fail.")
     if not settings.LEMONSQUEEZY_API_KEY:
          logger.warning("LEMONSQUEEZY_API_KEY is not set. Payment creation will fail.")
+    if not settings.OPENROUTER_API_KEY:
+         logger.critical("FATAL: OPENROUTER_API_KEY (your single key) is not set.")
+         raise ValueError("OPENROUTER_API_KEY is mandatory.")
+    if settings.PROXY_ENABLED and not (settings.PROXY_LIST or (settings.PROXY_HOST and settings.PROXY_PORT and settings.PROXY_USER and settings.PROXY_PASSWORD)):
+        logger.warning("PROXY_ENABLED is True, but no valid PROXY_LIST or single proxy credentials found.")
+
 except Exception as e:
     logger.critical(f"FATAL: Failed to initialize settings: {e}", exc_info=True)
     # Exit or raise to prevent app start with invalid config
