@@ -5,13 +5,17 @@ import logging
 from cryptography.fernet import Fernet, InvalidToken
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+from typing import Optional # <<< CORRECTED: Added missing import
 
-# CORRECTED IMPORTS: Replaced "Nexus Plan.app" with "app"
+# Corrected relative import
 try:
     from app.core.config import settings
 except ImportError:
     print("[Security] WARNING: Using fallback imports.")
-    from app.core.config import settings
+    # This fallback assumes the script is run from a different working directory
+    # or PYTHONPATH needs adjustment in certain execution contexts.
+    # For standard execution via uvicorn app.main:app, the primary import should work.
+    from core.config import settings # Fallback if run directly or structure differs
 
 logger = logging.getLogger(__name__)
 
