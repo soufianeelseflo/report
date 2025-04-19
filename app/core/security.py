@@ -6,9 +6,9 @@ from cryptography.fernet import Fernet, InvalidToken
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
-# Corrected relative import
+# CORRECTED IMPORT: Replaced "Nexus Plan.app" with "app"
 try:
-    from Nexus Plan.app.core.config import settings
+    from app.core.config import settings
 except ImportError:
     print("[Security] WARNING: Using fallback imports.")
     from app.core.config import settings
@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 # --- Key Derivation (Use only if ENCRYPTION_KEY is not pre-generated correctly) ---
 # WARNING: Using a fixed salt is not ideal for production.
 # Prefer generating a strong 32-byte URL-safe base64 key and setting it directly.
-FIXED_SALT = b'Nexus Plan_salt_16' # MUST be 16 bytes - Replace in production!
+FIXED_SALT = b'NexusPlan_salt_16' # MUST be 16 bytes - Replace in production!
 
 def _derive_key(password: str, salt: bytes) -> bytes:
     """Derives a Fernet key from a password string using PBKDF2HMAC."""
