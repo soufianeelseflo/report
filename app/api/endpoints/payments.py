@@ -3,12 +3,12 @@ import hmac
 import hashlib
 import json
 import logging
-import datetime # Added missing import
 from fastapi import APIRouter, Depends, HTTPException, status, Request, Header, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select # Added missing import
+from sqlalchemy import select # Added select
 import httpx
 from typing import Optional
+import datetime # Added datetime
 
 # CORRECTED IMPORTS: Replaced "Nexus Plan.app" with "app"
 try:
@@ -106,8 +106,8 @@ async def create_lemon_squeezy_checkout(
                 # Optionally configure expires_at if needed
             },
             "relationships": {
-                "store": {"data": {"type": "stores", "id": settings.LEMONSQUEEZY_STORE_ID}},
-                "variant": {"data": {"type": "variants", "id": variant_id}},
+                "store": {"data": {"type": "stores", "id": str(settings.LEMONSQUEEZY_STORE_ID)}}, # Ensure ID is string
+                "variant": {"data": {"type": "variants", "id": str(variant_id)}}, # Ensure ID is string
             },
         }
     }
@@ -206,8 +206,7 @@ async def lemon_squeezy_webhook(
             # --- Transactional Update ---
             # get_db_session dependency handles commit/rollback
             try:
-                # Pass order_data directly, crud function expects the full dict
-                report_request = await crud.create_initial_report_request(db, order_data)
+                report_request = await crud.create_initial_report_request(db, order_data) # Pass full order_data
 
                 if report_request:
                     # Determine priority based on report type

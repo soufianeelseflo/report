@@ -1,10 +1,11 @@
 # autonomous_agency/app/core/config.py
 import os
 import base64
+import re # Import re for proxy list validation
 from pydantic_settings import BaseSettings
 from typing import Optional, List, Union, Any, Dict # Added Any, Dict
-from pydantic import validator, PostgresDsn, AnyHttpUrl, Field # Added validators, Field
-import logging # Added logging
+from pydantic import validator, PostgresDsn, AnyHttpUrl, Field, ValidationError # Added ValidationError
+import logging
 
 logger = logging.getLogger(__name__)
 
@@ -22,13 +23,16 @@ class Settings(BaseSettings):
         if not v:
             raise ValueError("ENCRYPTION_KEY must be set in environment.")
         try:
-            key_bytes = v.encode()
-            # Check if it's valid base64 and 32 bytes long when decoded
-            if len(base64.urlsafe_b64decode(key_bytes)) != 32:
-                raise ValueError("ENCRYPTION_KEY must be 32 url-safe base64-encoded bytes.")
-        except Exception as e:
-            raise ValueError(f"ENCRYPTION_KEY is invalid: {e}")
-        return v
+            # Ensure correct padding for URL-safe base64
+            # Python's base64 decoder handles padding automatically if needed,
+            # but requires the input length to be valid. Fernet expects exactly 32 bytes decoded.
+            key_bytes = base64.urlsafe_b64decode(v + '==') # Add padding just in case, decoder ignores extra if not needed
+            if len(key_bytes) != 32:
+                raise ValueError(f"ENCRYPTION_KEY must decode to 32 bytes, but got {len(key_bytes)} bytes.")
+        except (TypeError, ValueError, base64.binascii.Error) as e: # Catch specific base64 errors
+            # Raise a ValueError that Pydantic understands, but avoid echoing the key
+            raise ValueError(f"ENCRYPTION_KEY is invalid or incorrectly formatted: {e}")
+        return v # Return original value if valid
 
     # --- Database Configuration ---
     POSTGRES_SERVER: str
@@ -50,12 +54,17 @@ class Settings(BaseSettings):
         db = values.get("POSTGRES_DB")
         if not all([user, password, server, port, db]):
              raise ValueError("Missing PostgreSQL connection details.")
+        # Ensure port is integer before building DSN
+        try:
+            port_int = int(port)
+        except (ValueError, TypeError):
+            raise ValueError(f"Invalid POSTGRES_PORT: '{port}'. Must be an integer.")
         return PostgresDsn.build(
             scheme="postgresql+asyncpg",
             username=user,
             password=password,
             host=server,
-            port=int(port), # Ensure port is integer
+            port=port_int,
             path=f"/{db}",
         )
 
@@ -70,12 +79,17 @@ class Settings(BaseSettings):
         db = values.get("POSTGRES_DB")
         if not all([user, password, server, port, db]):
              raise ValueError("Missing PostgreSQL connection details.")
+        # Ensure port is integer before building DSN
+        try:
+            port_int = int(port)
+        except (ValueError, TypeError):
+            raise ValueError(f"Invalid POSTGRES_PORT: '{port}'. Must be an integer.")
         return PostgresDsn.build(
             scheme="postgresql", # Use standard scheme for psycopg2
             username=user,
             password=password,
             host=server,
-            port=int(port),
+            port=port_int,
             path=f"/{db}",
         )
 
@@ -94,8 +108,6 @@ class Settings(BaseSettings):
     # --- LLM Provider Configuration ---
     LLM_PROVIDER: str = "openrouter" # Keep as only supported option for now
     OPENROUTER_API_KEY: str # Changed to required - The single key
-    # HTTP_REFERER: Optional[str] = None # REMOVED - Use AGENCY_BASE_URL
-    # X_TITLE: Optional[str] = None # REMOVED - Use PROJECT_NAME
     STANDARD_REPORT_MODEL: str = "google/gemini-1.5-flash-latest" # Default model for standard reports/tasks
     PREMIUM_REPORT_MODEL: str = "google/gemini-1.5-pro-latest" # Default model for premium reports/tasks
     RATE_LIMIT_COOLDOWN_SECONDS: int = 60 # Shorter cooldown, assume manual fix
@@ -103,7 +115,6 @@ class Settings(BaseSettings):
 
     # --- External Tools & Internal Services ---
     OPEN_DEEP_RESEARCH_SERVICE_URL: AnyHttpUrl = Field(default="http://odr-service:3000", description="Internal ODR service URL")
-    # INTERNAL_ODR_API_KEY: Optional[str] = Field(None, description="Optional API key for securing internal ODR calls") # REMOVED - Simplify
 
     # --- Proxies ---
     PROXY_ENABLED: bool = False # Default to False if not set
@@ -120,15 +131,19 @@ class Settings(BaseSettings):
             valid_proxies = []
             for p in v.split(','):
                 p_strip = p.strip()
-                if re.match(r"^(http|https|socks\d?)://.*:.*@.*:\d+", p_strip):
+                # Regex updated to handle optional scheme
+                if re.match(r"^(?:(http|https|socks\d?)://)?.*:.*@.*:\d+", p_strip):
+                    # Prepend http:// if scheme is missing (common for user:pass@host:port format)
+                    if not re.match(r"^(http|https|socks\d?)://", p_strip):
+                        p_strip = f"http://{p_strip}"
+                        logger.debug(f"Prepended 'http://' to proxy: {p_strip}")
                     valid_proxies.append(p_strip)
                 else:
                     logger.warning(f"Invalid proxy format in PROXY_LIST skipped: {p_strip}")
             return valid_proxies
-        return v
-
-    # --- Key Acquirer Configuration ---
-    # REMOVED ALL KEY_ACQUIRER_* variables
+        elif isinstance(v, list): # Handle case where it might already be a list
+            return v
+        return None # Return None if input is neither string nor list
 
     # --- Prospecting & Marketing Configuration ---
     MAX_PROSPECTS_PER_CYCLE: int = 50 # Increased prospecting volume
@@ -164,10 +179,6 @@ class Settings(BaseSettings):
     MCOL_MAX_STRATEGIES: int = 1 # Focus on executing one thing fast
 
     # --- Email Account Credentials (Reference - Add to DB manually) ---
-    # EMAIL_USERNAME: Optional[str] = None
-    # EMAIL_PASSWORD: Optional[str] = None
-    # EMAIL_SMTP_HOST: Optional[str] = None
-    # EMAIL_SMTP_PORT: Optional[int] = None
     EMAIL_SENDER_NAME: str = "Nexus Plan AI Strategist" # Default sender name
 
     class Config:
@@ -190,7 +201,28 @@ try:
     if settings.PROXY_ENABLED and not (settings.PROXY_LIST or (settings.PROXY_HOST and settings.PROXY_PORT and settings.PROXY_USER and settings.PROXY_PASSWORD)):
         logger.warning("PROXY_ENABLED is True, but no valid PROXY_LIST or single proxy credentials found.")
 
-except Exception as e:
-    logger.critical(f"FATAL: Failed to initialize settings: {e}", exc_info=True)
-    # Exit or raise to prevent app start with invalid config
-    raise SystemExit(f"Configuration Error: {e}")
+except ValidationError as e:
+    # --- MODIFIED EXCEPTION HANDLING ---
+    error_summary = []
+    is_encryption_key_error = False
+    for error in e.errors():
+        loc = ".".join(map(str, error['loc']))
+        msg = error['msg']
+        if loc == 'ENCRYPTION_KEY':
+            is_encryption_key_error = True
+            # Log generic error for encryption key, avoid logging the value
+            error_summary.append(f"FATAL: ENCRYPTION_KEY validation failed: {msg}. Ensure it is a 32-byte URL-safe base64 encoded string.")
+        else:
+            # Log other validation errors normally
+            error_summary.append(f"Config Error [{loc}]: {msg}")
+
+    log_message = "\n".join(error_summary)
+    logger.critical(f"FATAL: Failed to initialize settings:\n{log_message}")
+    if is_encryption_key_error:
+        logger.critical("Please generate a new valid ENCRYPTION_KEY and set it in your environment.")
+    raise SystemExit(f"Configuration Error(s):\n{log_message}")
+    # --- END MODIFIED EXCEPTION HANDLING ---
+
+except Exception as e: # Catch other potential errors during init
+    logger.critical(f"FATAL: Unexpected error initializing settings: {e}", exc_info=True)
+    raise SystemExit(f"Unexpected Configuration Error: {e}")

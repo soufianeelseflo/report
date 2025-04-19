@@ -36,7 +36,6 @@ logger = logging.getLogger(__name__)
 if not logger.hasHandlers():
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - [%(funcName)s] - %(message)s')
 
-
 # Define where reports will be stored (relative to the app root inside the container)
 REPORTS_OUTPUT_DIR = "/app/generated_reports"
 os.makedirs(REPORTS_OUTPUT_DIR, exist_ok=True)
@@ -492,11 +491,8 @@ async def main():
         shutdown_event.set()
 
     loop = asyncio.get_event_loop()
-    # Use add_signal_handler for POSIX systems
-    if hasattr(signal, 'SIGINT'):
-        loop.add_signal_handler(signal.SIGINT, signal_handler)
-    if hasattr(signal, 'SIGTERM'):
-        loop.add_signal_handler(signal.SIGTERM, signal_handler)
+    loop.add_signal_handler(signal.SIGINT, signal_handler)
+    loop.add_signal_handler(signal.SIGTERM, signal_handler)
 
     await run_report_generator_worker(shutdown_event)
 

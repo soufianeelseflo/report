@@ -35,18 +35,15 @@ logger = logging.getLogger(__name__)
 if not logger.hasHandlers():
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - [%(funcName)s] - %(message)s')
 
-
 # --- Report Request CRUD ---
 
 async def create_initial_report_request(
     db: AsyncSession,
-    order_data: dict, # Parsed data from Lemon Squeezy webhook
-    custom_data: dict # Explicitly pass custom_data from webhook meta
+    order_data: dict # Parsed data from Lemon Squeezy webhook
 ) -> Optional[models.ReportRequest]:
     """
     Creates a report request after successful payment via webhook with status AWAITING_GENERATION.
     Checks for duplicates based on the Lemon Squeezy Order ID.
-    Uses custom_data from webhook meta.
     """
     ls_order_id = order_data.get('id')
     if not ls_order_id:
@@ -65,7 +62,7 @@ async def create_initial_report_request(
     variant_id = attributes.get('first_order_item', {}).get('variant_id')
     order_total_cents = attributes.get('total', 0)
 
-    # Use custom_data passed from webhook meta
+    custom_data = attributes.get('custom_data', {})
     request_details = custom_data.get('research_topic', 'Not Provided - Check Order Notes')
     company_name_custom = custom_data.get('company_name')
 
@@ -104,8 +101,8 @@ async def get_report_request(db: AsyncSession, request_id: int) -> Optional[mode
      result = await db.execute(select(models.ReportRequest).where(models.ReportRequest.request_id == request_id))
      return result.scalars().first()
 
-# --- MODIFICATION: Add get_and_lock_pending_report_request ---
-async def get_and_lock_pending_report_request(db: AsyncSession) -> Optional[models.ReportRequest]:
+# --- MODIFICATION: Add get_pending_report_request ---
+async def get_and_lock_pending_report_request(db: AsyncSession) -> Optional[models.ReportRequest]: # Renamed for clarity
     """
     Gets the next report request with status 'AWAITING_GENERATION'
     and locks it for processing using FOR UPDATE SKIP LOCKED.
@@ -271,28 +268,27 @@ async def get_active_email_account_for_sending(db: AsyncSession) -> Optional[mod
     and handles daily reset logic. Uses FOR UPDATE SKIP LOCKED.
     """
     today = datetime.date.today()
-    # Use explicit transaction control for reset
-    async with db.begin_nested(): # Use nested transaction for reset
-        reset_candidates = await db.scalars(
-            select(models.EmailAccount.account_id)
-            .where(models.EmailAccount.is_active == True)
-            .where(models.EmailAccount.last_reset_date < today)
-            .with_for_update(skip_locked=True) # Lock only accounts needing reset
+    # Use CTE or separate queries for reset for better locking scope
+    reset_candidates = await db.scalars(
+        select(models.EmailAccount.account_id)
+        .where(models.EmailAccount.is_active == True)
+        .where(models.EmailAccount.last_reset_date < today)
+        .with_for_update(skip_locked=True) # Lock only accounts needing reset
+    )
+    reset_ids = reset_candidates.all()
+
+    if reset_ids:
+        reset_stmt = (
+            update(models.EmailAccount)
+            .where(models.EmailAccount.account_id.in_(reset_ids))
+            .values(emails_sent_today=0, last_reset_date=today)
+            .execution_options(synchronize_session=False)
         )
-        reset_ids = reset_candidates.all()
+        await db.execute(reset_stmt)
+        logger.info(f"Reset daily counts for {len(reset_ids)} email accounts.")
+        # Commit the reset separately? Or rely on the main transaction? Rely on main for now.
 
-        if reset_ids:
-            reset_stmt = (
-                update(models.EmailAccount)
-                .where(models.EmailAccount.account_id.in_(reset_ids))
-                .values(emails_sent_today=0, last_reset_date=today)
-                .execution_options(synchronize_session=False)
-            )
-            await db.execute(reset_stmt)
-            logger.info(f"Reset daily counts for {len(reset_ids)} email accounts.")
-        # Nested transaction commits here if successful
-
-    # Now fetch a usable account in the main transaction
+    # Now fetch a usable account
     stmt = (
         select(models.EmailAccount)
         .where(models.EmailAccount.is_active == True)
@@ -351,25 +347,23 @@ async def get_batch_of_active_accounts(db: AsyncSession, limit: int) -> List[mod
     """
     today = datetime.date.today()
     # Step 1: Reset counts for accounts needing it (lock only these)
-    async with db.begin_nested(): # Use nested transaction for reset
-        reset_candidates = await db.scalars(
-            select(models.EmailAccount.account_id)
-            .where(models.EmailAccount.is_active == True)
-            .where(models.EmailAccount.last_reset_date < today)
-            .with_for_update(skip_locked=True)
-        )
-        reset_ids = reset_candidates.all()
+    reset_candidates = await db.scalars(
+        select(models.EmailAccount.account_id)
+        .where(models.EmailAccount.is_active == True)
+        .where(models.EmailAccount.last_reset_date < today)
+        .with_for_update(skip_locked=True)
+    )
+    reset_ids = reset_candidates.all()
 
-        if reset_ids:
-            reset_stmt = (
-                update(models.EmailAccount)
-                .where(models.EmailAccount.account_id.in_(reset_ids))
-                .values(emails_sent_today=0, last_reset_date=today)
-                .execution_options(synchronize_session=False)
-            )
-            await db.execute(reset_stmt)
-            # logger.info(f"[EmailAccountCRUD] Reset daily counts for {len(reset_ids)} accounts.")
-        # Nested transaction commits here
+    if reset_ids:
+        reset_stmt = (
+            update(models.EmailAccount)
+            .where(models.EmailAccount.account_id.in_(reset_ids))
+            .values(emails_sent_today=0, last_reset_date=today)
+            .execution_options(synchronize_session=False)
+        )
+        await db.execute(reset_stmt)
+        # logger.info(f"[EmailAccountCRUD] Reset daily counts for {len(reset_ids)} accounts.")
 
     # Step 2: Fetch usable accounts (active, alias set, under limit after potential reset)
     stmt = (
